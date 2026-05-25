@@ -1,0 +1,19 @@
+{
+  "name": "@dp-proj/scripts",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Automation scripts for the WordPress Web Agency monorepo",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "validate": "node validate-structure.js"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "pixelmatch": "5.3.0",
+    "pngjs": "7.0.0",
+    "yaml": "^2.9.0"
+  }
+}

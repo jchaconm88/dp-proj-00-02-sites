@@ -1,0 +1,476 @@
+/**
+ * Mi Cliente Theme — WooCommerce Styles
+ *
+ * Mobile-first approach using Design System tokens from theme.json.
+ * No hardcoded color values — all colors reference CSS custom properties.
+ *
+ * Breakpoints:
+ *   - Base: mobile (< 768px)
+ *   - Tablet: min-width: 768px
+ *   - Desktop: min-width: 1024px
+ *
+ * @package Mi_Cliente_Theme
+ * @since 1.0.0
+ */
+
+/* ==========================================================================
+   1. BUTTONS
+   ========================================================================== */
+
+/**
+ * Add to Cart button
+ */
+.woocommerce a.button,
+.woocommerce button.button,
+.woocommerce input.button,
+.woocommerce .button.add_to_cart_button,
+.woocommerce .single_add_to_cart_button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--wp--preset--spacing--20) var(--wp--preset--spacing--40);
+    background-color: var(--wp--preset--color--primary);
+    color: var(--wp--preset--color--on-primary);
+    font-family: var(--wp--preset--font-family--body);
+    font-size: var(--wp--preset--font-size--medium);
+    font-weight: 600;
+    line-height: 1.5;
+    text-decoration: none;
+    border: none;
+    border-radius: var(--wp--custom--border-radius--default, 8px);
+    cursor: pointer;
+    transition: background-color 0.2s ease, transform 0.2s ease;
+    min-height: 44px;
+    min-width: 44px;
+}
+
+.woocommerce a.button:hover,
+.woocommerce button.button:hover,
+.woocommerce input.button:hover,
+.woocommerce .button.add_to_cart_button:hover,
+.woocommerce .single_add_to_cart_button:hover {
+    background-color: var(--wp--preset--color--accent);
+    color: var(--wp--preset--color--on-secondary);
+    transform: translateY(-1px);
+}
+
+.woocommerce a.button:focus-visible,
+.woocommerce button.button:focus-visible,
+.woocommerce input.button:focus-visible {
+    outline: 2px solid var(--wp--preset--color--accent);
+    outline-offset: 2px;
+}
+
+.woocommerce a.button:active,
+.woocommerce button.button:active,
+.woocommerce input.button:active {
+    transform: translateY(0);
+}
+
+/**
+ * Proceed to Payment / Checkout button
+ */
+.woocommerce .checkout-button,
+.woocommerce #place_order,
+.woocommerce .wc-proceed-to-checkout a.checkout-button {
+    display: block;
+    width: 100%;
+    padding: var(--wp--preset--spacing--30) var(--wp--preset--spacing--40);
+    background-color: var(--wp--preset--color--accent);
+    color: var(--wp--preset--color--on-secondary);
+    font-family: var(--wp--preset--font-family--body);
+    font-size: var(--wp--preset--font-size--large);
+    font-weight: 700;
+    text-align: center;
+    text-decoration: none;
+    border: none;
+    border-radius: var(--wp--custom--border-radius--default, 8px);
+    cursor: pointer;
+    transition: background-color 0.2s ease, transform 0.2s ease;
+    min-height: 48px;
+}
+
+.woocommerce .checkout-button:hover,
+.woocommerce #place_order:hover,
+.woocommerce .wc-proceed-to-checkout a.checkout-button:hover {
+    background-color: var(--wp--preset--color--primary);
+    color: var(--wp--preset--color--on-primary);
+    transform: translateY(-1px);
+}
+
+.woocommerce .checkout-button:focus-visible,
+.woocommerce #place_order:focus-visible {
+    outline: 2px solid var(--wp--preset--color--primary);
+    outline-offset: 2px;
+}
+
+/**
+ * Alt/secondary buttons
+ */
+.woocommerce a.button.alt,
+.woocommerce button.button.alt,
+.woocommerce input.button.alt {
+    background-color: var(--wp--preset--color--secondary);
+    color: var(--wp--preset--color--on-secondary);
+}
+
+.woocommerce a.button.alt:hover,
+.woocommerce button.button.alt:hover,
+.woocommerce input.button.alt:hover {
+    background-color: var(--wp--preset--color--primary);
+    color: var(--wp--preset--color--on-primary);
+}
+
+/* ==========================================================================
+   2. PRODUCT CARDS (Catalog Grid)
+   ========================================================================== */
+
+.woocommerce ul.products {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--wp--preset--spacing--40);
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.woocommerce ul.products li.product {
+    display: flex;
+    flex-direction: column;
+    background-color: var(--wp--preset--color--surface);
+    border-radius: var(--wp--custom--border-radius--md, 12px);
+    overflow: hidden;
+    transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.woocommerce ul.products li.product:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    transform: translateY(-2px);
+}
+
+.woocommerce ul.products li.product a img {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1 / 1;
+    object-fit: cover;
+    display: block;
+}
+
+.woocommerce ul.products li.product .woocommerce-loop-product__title {
+    font-family: var(--wp--preset--font-family--heading);
+    font-size: var(--wp--preset--font-size--large);
+    color: var(--wp--preset--color--on-surface);
+    margin: var(--wp--preset--spacing--30) var(--wp--preset--spacing--30) var(--wp--preset--spacing--10);
+    padding: 0;
+}
+
+.woocommerce ul.products li.product .price {
+    font-family: var(--wp--preset--font-family--body);
+    font-size: var(--wp--preset--font-size--medium);
+    color: var(--wp--preset--color--on-surface);
+    padding: 0 var(--wp--preset--spacing--30);
+    margin-bottom: var(--wp--preset--spacing--20);
+}
+
+.woocommerce ul.products li.product .price del {
+    color: var(--wp--preset--color--on-surface);
+    opacity: 0.5;
+    margin-right: var(--wp--preset--spacing--10);
+}
+
+.woocommerce ul.products li.product .price ins {
+    text-decoration: none;
+    font-weight: 700;
+    color: var(--wp--preset--color--primary);
+}
+
+.woocommerce ul.products li.product .button {
+    margin: auto var(--wp--preset--spacing--30) var(--wp--preset--spacing--30);
+    align-self: flex-start;
+}
+
+/* ==========================================================================
+   3. CHECKOUT FORMS
+   ========================================================================== */
+
+.woocommerce form .form-row {
+    margin-bottom: var(--wp--preset--spacing--30);
+}
+
+.woocommerce form .form-row label {
+    display: block;
+    font-family: var(--wp--preset--font-family--body);
+    font-size: var(--wp--preset--font-size--small);
+    font-weight: 600;
+    color: var(--wp--preset--color--on-background);
+    margin-bottom: var(--wp--preset--spacing--10);
+}
+
+.woocommerce form .form-row input.input-text,
+.woocommerce form .form-row textarea,
+.woocommerce form .form-row select {
+    width: 100%;
+    padding: var(--wp--preset--spacing--20) var(--wp--preset--spacing--30);
+    font-family: var(--wp--preset--font-family--body);
+    font-size: var(--wp--preset--font-size--medium);
+    color: var(--wp--preset--color--on-background);
+    background-color: var(--wp--preset--color--background);
+    border: 1px solid var(--wp--preset--color--on-surface);
+    border-radius: var(--wp--custom--border-radius--sm, 4px);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    min-height: 44px;
+}
+
+.woocommerce form .form-row input.input-text:focus,
+.woocommerce form .form-row textarea:focus,
+.woocommerce form .form-row select:focus {
+    outline: none;
+    border-color: var(--wp--preset--color--primary);
+    box-shadow: 0 0 0 2px rgba(26, 26, 46, 0.15);
+}
+
+.woocommerce form .form-row.woocommerce-invalid input.input-text,
+.woocommerce form .form-row.woocommerce-invalid select {
+    border-color: var(--wp--preset--color--error);
+}
+
+.woocommerce form .form-row .required {
+    color: var(--wp--preset--color--error);
+}
+
+/* ==========================================================================
+   4. NOTIFICATIONS (Messages)
+   ========================================================================== */
+
+.woocommerce .woocommerce-message,
+.woocommerce .woocommerce-info,
+.woocommerce .woocommerce-error {
+    padding: var(--wp--preset--spacing--30) var(--wp--preset--spacing--40);
+    margin-bottom: var(--wp--preset--spacing--40);
+    border-radius: var(--wp--custom--border-radius--sm, 4px);
+    font-family: var(--wp--preset--font-family--body);
+    font-size: var(--wp--preset--font-size--medium);
+    line-height: 1.5;
+    border: none;
+    list-style: none;
+}
+
+.woocommerce .woocommerce-message {
+    background-color: var(--wp--preset--color--surface);
+    color: var(--wp--preset--color--primary);
+    border-left: 4px solid var(--wp--preset--color--primary);
+}
+
+.woocommerce .woocommerce-info {
+    background-color: var(--wp--preset--color--surface);
+    color: var(--wp--preset--color--secondary);
+    border-left: 4px solid var(--wp--preset--color--accent);
+}
+
+.woocommerce .woocommerce-error {
+    background-color: var(--wp--preset--color--surface);
+    color: var(--wp--preset--color--error);
+    border-left: 4px solid var(--wp--preset--color--error);
+}
+
+.woocommerce .woocommerce-error li {
+    list-style: none;
+    margin-bottom: var(--wp--preset--spacing--10);
+}
+
+.woocommerce .woocommerce-error li:last-child {
+    margin-bottom: 0;
+}
+
+/* ==========================================================================
+   5. PRICE & DISCOUNT BADGES
+   ========================================================================== */
+
+.woocommerce span.onsale {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: absolute;
+    top: var(--wp--preset--spacing--20);
+    left: var(--wp--preset--spacing--20);
+    min-width: 48px;
+    min-height: 48px;
+    padding: var(--wp--preset--spacing--10) var(--wp--preset--spacing--20);
+    background-color: var(--wp--preset--color--accent);
+    color: var(--wp--preset--color--on-secondary);
+    font-family: var(--wp--preset--font-family--body);
+    font-size: var(--wp--preset--font-size--small);
+    font-weight: 700;
+    border-radius: var(--wp--custom--border-radius--full, 9999px);
+    z-index: 1;
+}
+
+.woocommerce ul.products li.product {
+    position: relative;
+}
+
+.woocommerce .single-product .onsale {
+    top: var(--wp--preset--spacing--30);
+    left: var(--wp--preset--spacing--30);
+}
+
+.woocommerce .price del {
+    opacity: 0.5;
+    text-decoration: line-through;
+}
+
+.woocommerce .price ins {
+    text-decoration: none;
+    font-weight: 700;
+}
+
+/* ==========================================================================
+   6. PRODUCT PAGINATION
+   ========================================================================== */
+
+.woocommerce nav.woocommerce-pagination {
+    margin-top: var(--wp--preset--spacing--50);
+    text-align: center;
+}
+
+.woocommerce nav.woocommerce-pagination ul {
+    display: inline-flex;
+    gap: var(--wp--preset--spacing--10);
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    border: none;
+}
+
+.woocommerce nav.woocommerce-pagination ul li {
+    border: none;
+}
+
+.woocommerce nav.woocommerce-pagination ul li a,
+.woocommerce nav.woocommerce-pagination ul li span {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
+    padding: var(--wp--preset--spacing--10) var(--wp--preset--spacing--20);
+    font-family: var(--wp--preset--font-family--body);
+    font-size: var(--wp--preset--font-size--medium);
+    color: var(--wp--preset--color--on-background);
+    background-color: var(--wp--preset--color--surface);
+    border-radius: var(--wp--custom--border-radius--sm, 4px);
+    text-decoration: none;
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.woocommerce nav.woocommerce-pagination ul li a:hover {
+    background-color: var(--wp--preset--color--primary);
+    color: var(--wp--preset--color--on-primary);
+}
+
+.woocommerce nav.woocommerce-pagination ul li a:focus-visible {
+    outline: 2px solid var(--wp--preset--color--accent);
+    outline-offset: 2px;
+}
+
+.woocommerce nav.woocommerce-pagination ul li span.current {
+    background-color: var(--wp--preset--color--primary);
+    color: var(--wp--preset--color--on-primary);
+    font-weight: 700;
+}
+
+/* ==========================================================================
+   7. TABLET BREAKPOINT (min-width: 768px)
+   ========================================================================== */
+
+@media (min-width: 768px) {
+    /* Product grid: 2 columns on tablet */
+    .woocommerce ul.products {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    /* Checkout form: 2-column layout */
+    .woocommerce .col2-set {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: var(--wp--preset--spacing--40);
+    }
+
+    .woocommerce .col2-set .col-1,
+    .woocommerce .col2-set .col-2 {
+        width: 100%;
+    }
+
+    /* Buttons: inline sizing */
+    .woocommerce .checkout-button,
+    .woocommerce #place_order,
+    .woocommerce .wc-proceed-to-checkout a.checkout-button {
+        width: auto;
+        display: inline-flex;
+        min-width: 240px;
+    }
+
+    /* Notifications: horizontal layout */
+    .woocommerce .woocommerce-message,
+    .woocommerce .woocommerce-info,
+    .woocommerce .woocommerce-error {
+        display: flex;
+        align-items: center;
+        gap: var(--wp--preset--spacing--30);
+    }
+
+    /* Pagination: larger touch targets */
+    .woocommerce nav.woocommerce-pagination ul li a,
+    .woocommerce nav.woocommerce-pagination ul li span {
+        min-width: 40px;
+        min-height: 40px;
+    }
+}
+
+/* ==========================================================================
+   8. DESKTOP BREAKPOINT (min-width: 1024px)
+   ========================================================================== */
+
+@media (min-width: 1024px) {
+    /* Product grid: 3-4 columns on desktop */
+    .woocommerce ul.products {
+        grid-template-columns: repeat(3, 1fr);
+        gap: var(--wp--preset--spacing--50);
+    }
+
+    .woocommerce ul.products.columns-4 {
+        grid-template-columns: repeat(4, 1fr);
+    }
+
+    /* Product card: enhanced hover */
+    .woocommerce ul.products li.product:hover {
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+        transform: translateY(-4px);
+    }
+
+    /* Checkout: wider form inputs */
+    .woocommerce form .form-row input.input-text,
+    .woocommerce form .form-row textarea,
+    .woocommerce form .form-row select {
+        padding: var(--wp--preset--spacing--30) var(--wp--preset--spacing--40);
+    }
+
+    /* Checkout button: right-aligned */
+    .woocommerce .wc-proceed-to-checkout {
+        text-align: right;
+    }
+
+    /* Notifications: max-width for readability */
+    .woocommerce .woocommerce-message,
+    .woocommerce .woocommerce-info,
+    .woocommerce .woocommerce-error {
+        max-width: 800px;
+    }
+
+    /* Sale badge: slightly larger on desktop */
+    .woocommerce span.onsale {
+        min-width: 56px;
+        min-height: 56px;
+        font-size: var(--wp--preset--font-size--medium);
+    }
+}

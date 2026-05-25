@@ -1,0 +1,87 @@
+<!-- wp:group {"tagName":"header","align":"full","style":{"spacing":{"padding":{"top":"var:preset|spacing|30","bottom":"var:preset|spacing|30","left":"var:preset|spacing|40","right":"var:preset|spacing|40"}},"color":{"background":"var(--wp--preset--color--primary)"}},"className":"site-header"} -->
+<header class="wp-block-group alignfull site-header" style="background-color:var(--wp--preset--color--primary);padding-top:var(--wp--preset--spacing--30);padding-bottom:var(--wp--preset--spacing--30);padding-left:var(--wp--preset--spacing--40);padding-right:var(--wp--preset--spacing--40)">
+
+<!-- wp:group {"layout":{"type":"flex","flexWrap":"wrap","justifyContent":"space-between","verticalAlignment":"center"},"style":{"spacing":{"blockGap":"var:preset|spacing|30"}}} -->
+<div class="wp-block-group">
+
+<!-- wp:site-title {"style":{"typography":{"fontSize":"var(--wp--preset--font-size--x-large)","fontFamily":"var(--wp--preset--font-family--heading)"},"color":{"text":"var(--wp--preset--color--on-primary)"},"elements":{"link":{"color":{"text":"var(--wp--preset--color--on-primary)"}}}}} /-->
+
+<!-- wp:group {"layout":{"type":"flex","flexWrap":"nowrap","verticalAlignment":"center"},"style":{"spacing":{"blockGap":"var:preset|spacing|30"}},"className":"header-navigation-group"} -->
+<div class="wp-block-group header-navigation-group">
+
+<!-- wp:navigation {"overlayMenu":"mobile","overlayBackgroundColor":"primary","overlayTextColor":"on-primary","style":{"typography":{"fontSize":"var(--wp--preset--font-size--medium)"},"spacing":{"blockGap":"var:preset|spacing|30"}},"textColor":"on-primary","className":"main-navigation"} -->
+<!-- wp:navigation-link {"label":"Inicio","url":"/","kind":"custom","isTopLevelLink":true} /-->
+<!-- wp:navigation-link {"label":"Tienda","url":"/tienda","kind":"custom","isTopLevelLink":true} /-->
+<!-- wp:navigation-link {"label":"Nosotros","url":"/nosotros","kind":"custom","isTopLevelLink":true} /-->
+<!-- wp:navigation-link {"label":"Contacto","url":"/contacto","kind":"custom","isTopLevelLink":true} /-->
+<!-- /wp:navigation -->
+
+<!-- wp:woocommerce/mini-cart {"miniCartIcon":"cart","style":{"typography":{"fontSize":"var(--wp--preset--font-size--medium)"}},"textColor":"on-primary"} /-->
+
+</div>
+<!-- /wp:group -->
+
+</div>
+<!-- /wp:group -->
+
+</header>
+<!-- /wp:group -->
+
+<!-- wp:html -->
+<style>
+/* Responsive navigation — hamburger menu for mobile < 768px */
+/* WordPress core handles the overlay menu toggle via overlayMenu:"mobile" */
+/* These styles ensure proper touch targets and transitions */
+
+.site-header .wp-block-navigation__responsive-container-open,
+.site-header .wp-block-navigation__responsive-container-close {
+	min-width: 44px;
+	min-height: 44px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 8px;
+	cursor: pointer;
+}
+
+.site-header .wp-block-navigation__responsive-container {
+	transition: transform 300ms ease-in-out, opacity 300ms ease-in-out;
+}
+
+.site-header .wp-block-navigation__responsive-container.is-menu-open {
+	transform: translateX(0);
+	opacity: 1;
+}
+
+.site-header .wp-block-navigation__responsive-container:not(.is-menu-open) {
+	transform: translateX(100%);
+	opacity: 0;
+}
+
+/* Ensure all interactive elements meet 44x44px minimum touch target */
+.site-header .wp-block-navigation-item__content,
+.site-header .wp-block-navigation__responsive-container-open,
+.site-header .wp-block-navigation__responsive-container-close,
+.site-header .wc-block-mini-cart__button {
+	min-width: 44px;
+	min-height: 44px;
+	display: inline-flex;
+	align-items: center;
+}
+
+/* Mobile-first: navigation links stacked on mobile */
+@media (max-width: 767px) {
+	.site-header .header-navigation-group {
+		width: 100%;
+		justify-content: flex-end;
+	}
+}
+
+/* Tablet and above: navigation inline */
+@media (min-width: 768px) {
+	.site-header .wp-block-navigation__responsive-container-open {
+		display: none;
+	}
+}
+</style>
+<!-- /wp:html -->

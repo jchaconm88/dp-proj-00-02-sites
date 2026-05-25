@@ -1,0 +1,435 @@
+/**
+ * Mi Cliente Theme - Complex Layouts
+ *
+ * Grid system (2-12 columns), parallax sections, slider/carousel base,
+ * and mega menu styles. Mobile-first with min-width media queries.
+ *
+ * @package Mi_Cliente_Theme
+ * @since 1.0.0
+ */
+
+/* ==========================================================================
+   CSS Grid System (2-12 columns)
+   ========================================================================== */
+
+.grid {
+    display: grid;
+    gap: var(--wp--preset--spacing--40, 24px);
+    width: 100%;
+}
+
+/* Mobile-first: single column by default */
+.grid-cols-2,
+.grid-cols-3,
+.grid-cols-4,
+.grid-cols-5,
+.grid-cols-6,
+.grid-cols-7,
+.grid-cols-8,
+.grid-cols-9,
+.grid-cols-10,
+.grid-cols-11,
+.grid-cols-12 {
+    grid-template-columns: 1fr;
+}
+
+/* Tablet breakpoint (min-width: 768px) */
+@media (min-width: 768px) {
+    .grid-cols-2 {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .grid-cols-3 {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .grid-cols-4 {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .grid-cols-5,
+    .grid-cols-6 {
+        grid-template-columns: repeat(3, 1fr);
+    }
+
+    .grid-cols-7,
+    .grid-cols-8 {
+        grid-template-columns: repeat(4, 1fr);
+    }
+
+    .grid-cols-9,
+    .grid-cols-10,
+    .grid-cols-11,
+    .grid-cols-12 {
+        grid-template-columns: repeat(4, 1fr);
+    }
+}
+
+/* Desktop breakpoint (min-width: 1024px) */
+@media (min-width: 1024px) {
+    .grid-cols-2 {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .grid-cols-3 {
+        grid-template-columns: repeat(3, 1fr);
+    }
+
+    .grid-cols-4 {
+        grid-template-columns: repeat(4, 1fr);
+    }
+
+    .grid-cols-5 {
+        grid-template-columns: repeat(5, 1fr);
+    }
+
+    .grid-cols-6 {
+        grid-template-columns: repeat(6, 1fr);
+    }
+
+    .grid-cols-7 {
+        grid-template-columns: repeat(7, 1fr);
+    }
+
+    .grid-cols-8 {
+        grid-template-columns: repeat(8, 1fr);
+    }
+
+    .grid-cols-9 {
+        grid-template-columns: repeat(9, 1fr);
+    }
+
+    .grid-cols-10 {
+        grid-template-columns: repeat(10, 1fr);
+    }
+
+    .grid-cols-11 {
+        grid-template-columns: repeat(11, 1fr);
+    }
+
+    .grid-cols-12 {
+        grid-template-columns: repeat(12, 1fr);
+    }
+}
+
+/* Grid span utilities */
+.col-span-2 { grid-column: span 2; }
+.col-span-3 { grid-column: span 3; }
+.col-span-4 { grid-column: span 4; }
+.col-span-5 { grid-column: span 5; }
+.col-span-6 { grid-column: span 6; }
+.col-span-7 { grid-column: span 7; }
+.col-span-8 { grid-column: span 8; }
+.col-span-9 { grid-column: span 9; }
+.col-span-10 { grid-column: span 10; }
+.col-span-11 { grid-column: span 11; }
+.col-span-12 { grid-column: span 12; }
+
+/* Grid gap variants */
+.grid-gap-sm { gap: var(--wp--preset--spacing--20, 8px); }
+.grid-gap-md { gap: var(--wp--preset--spacing--30, 16px); }
+.grid-gap-lg { gap: var(--wp--preset--spacing--50, 32px); }
+.grid-gap-xl { gap: var(--wp--preset--spacing--60, 48px); }
+
+/* Grid alignment */
+.grid-align-start { align-items: start; }
+.grid-align-center { align-items: center; }
+.grid-align-end { align-items: end; }
+.grid-align-stretch { align-items: stretch; }
+
+/* ==========================================================================
+   Parallax Sections (CSS-only)
+   ========================================================================== */
+
+.parallax-section {
+    position: relative;
+    min-height: 400px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    background-attachment: fixed;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: cover;
+}
+
+.parallax-section__content {
+    position: relative;
+    z-index: 2;
+    max-width: var(--wp--style--global--content-size, 1280px);
+    padding: var(--wp--preset--spacing--50, 32px);
+    width: 100%;
+}
+
+.parallax-section__overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    background-color: rgba(26, 26, 46, 0.6);
+}
+
+/* Parallax variants */
+.parallax-section--light .parallax-section__overlay {
+    background-color: rgba(255, 255, 255, 0.7);
+}
+
+.parallax-section--tall {
+    min-height: 600px;
+}
+
+.parallax-section--full {
+    min-height: 100vh;
+}
+
+/* Disable parallax on mobile for performance */
+@media (max-width: 767px) {
+    .parallax-section {
+        background-attachment: scroll;
+    }
+}
+
+/* ==========================================================================
+   Slider / Carousel Base Styles (CSS-only)
+   ========================================================================== */
+
+.carousel {
+    position: relative;
+    overflow: hidden;
+    width: 100%;
+}
+
+.carousel__track {
+    display: flex;
+    transition: transform 0.5s ease-in-out;
+    will-change: transform;
+}
+
+.carousel__slide {
+    flex: 0 0 100%;
+    min-width: 0;
+}
+
+/* Multi-slide carousel variants */
+@media (min-width: 768px) {
+    .carousel--multi .carousel__slide {
+        flex: 0 0 50%;
+    }
+}
+
+@media (min-width: 1024px) {
+    .carousel--multi .carousel__slide {
+        flex: 0 0 33.333%;
+    }
+}
+
+/* Carousel navigation */
+.carousel__nav {
+    display: flex;
+    justify-content: center;
+    gap: var(--wp--preset--spacing--20, 8px);
+    padding: var(--wp--preset--spacing--30, 16px) 0;
+}
+
+.carousel__dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 2px solid var(--wp--preset--color--primary, #1a1a2e);
+    background: transparent;
+    cursor: pointer;
+    padding: 0;
+    transition: background-color 0.3s ease;
+}
+
+.carousel__dot--active,
+.carousel__dot:hover {
+    background-color: var(--wp--preset--color--primary, #1a1a2e);
+}
+
+/* Carousel arrow buttons */
+.carousel__arrow {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 3;
+    width: 44px;
+    height: 44px;
+    border: none;
+    border-radius: 50%;
+    background-color: var(--wp--preset--color--background, #ffffff);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    color: var(--wp--preset--color--primary, #1a1a2e);
+    transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.carousel__arrow:hover {
+    background-color: var(--wp--preset--color--surface, #f8f9fa);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.carousel__arrow--prev {
+    left: var(--wp--preset--spacing--30, 16px);
+}
+
+.carousel__arrow--next {
+    right: var(--wp--preset--spacing--30, 16px);
+}
+
+/* CSS-only scroll snap carousel (no JS needed) */
+.carousel--snap .carousel__track {
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    transition: none;
+}
+
+.carousel--snap .carousel__track::-webkit-scrollbar {
+    display: none;
+}
+
+.carousel--snap .carousel__slide {
+    scroll-snap-align: start;
+}
+
+/* ==========================================================================
+   Mega Menu Styles
+   ========================================================================== */
+
+.mega-menu {
+    position: relative;
+}
+
+.mega-menu__trigger {
+    display: flex;
+    align-items: center;
+    gap: var(--wp--preset--spacing--10, 4px);
+    padding: var(--wp--preset--spacing--20, 8px) var(--wp--preset--spacing--30, 16px);
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-family: var(--wp--preset--font-family--body);
+    font-size: var(--wp--preset--font-size--medium, 16px);
+    color: inherit;
+}
+
+.mega-menu__trigger::after {
+    content: '';
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-right: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
+    transform: rotate(45deg);
+    transition: transform 0.3s ease;
+    margin-top: -4px;
+}
+
+.mega-menu__trigger[aria-expanded="true"]::after {
+    transform: rotate(-135deg);
+    margin-top: 2px;
+}
+
+.mega-menu__panel {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    z-index: 100;
+    width: 100vw;
+    max-width: var(--wp--style--global--wide-size, 1440px);
+    background-color: var(--wp--preset--color--background, #ffffff);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    border-radius: 0 0 var(--wp--custom--border-radius--md, 12px) var(--wp--custom--border-radius--md, 12px);
+    padding: var(--wp--preset--spacing--40, 24px);
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-8px);
+    transition: opacity 0.3s ease, visibility 0.3s ease, transform 0.3s ease;
+}
+
+.mega-menu__panel[aria-hidden="false"],
+.mega-menu__trigger[aria-expanded="true"] + .mega-menu__panel,
+.mega-menu:focus-within .mega-menu__panel {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+}
+
+.mega-menu__grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--wp--preset--spacing--40, 24px);
+}
+
+@media (min-width: 768px) {
+    .mega-menu__grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}
+
+@media (min-width: 1024px) {
+    .mega-menu__grid {
+        grid-template-columns: repeat(4, 1fr);
+    }
+}
+
+.mega-menu__column-title {
+    font-family: var(--wp--preset--font-family--heading);
+    font-size: var(--wp--preset--font-size--large, 18px);
+    font-weight: 700;
+    margin-bottom: var(--wp--preset--spacing--20, 8px);
+    color: var(--wp--preset--color--primary, #1a1a2e);
+}
+
+.mega-menu__list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.mega-menu__list li {
+    margin-bottom: var(--wp--preset--spacing--10, 4px);
+}
+
+.mega-menu__list a {
+    display: block;
+    padding: var(--wp--preset--spacing--10, 4px) 0;
+    color: var(--wp--preset--color--on-background, #1a1a2e);
+    text-decoration: none;
+    font-size: var(--wp--preset--font-size--small, 14px);
+    transition: color 0.2s ease;
+}
+
+.mega-menu__list a:hover,
+.mega-menu__list a:focus {
+    color: var(--wp--preset--color--accent, #0f3460);
+    text-decoration: underline;
+}
+
+/* Mobile mega menu */
+@media (max-width: 767px) {
+    .mega-menu__panel {
+        position: static;
+        width: 100%;
+        box-shadow: none;
+        border-radius: 0;
+        transform: none;
+        max-height: 0;
+        overflow: hidden;
+        padding: 0;
+        transition: max-height 0.3s ease, opacity 0.3s ease, padding 0.3s ease;
+    }
+
+    .mega-menu__panel[aria-hidden="false"],
+    .mega-menu__trigger[aria-expanded="true"] + .mega-menu__panel {
+        max-height: 1000px;
+        padding: var(--wp--preset--spacing--30, 16px);
+    }
+}

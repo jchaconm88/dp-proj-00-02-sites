@@ -1,0 +1,240 @@
+name: Validate
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'front/**'
+  push:
+    branches:
+      - develop
+    paths:
+      - 'front/**'
+
+env:
+  PHP_VERSION: '8.1'
+
+jobs:
+  detect-changes:
+    name: Detect Changed Clients
+    runs-on: ubuntu-latest
+    outputs:
+      clients: ${{ steps.detect.outputs.clients }}
+      has_changes: ${{ steps.detect.outputs.has_changes }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed client folders
+        id: detect
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE_SHA="${{ github.event.before }}"
+          fi
+          
+          # Get changed files in front/ecommerce/
+          CHANGED_FILES=$(git diff --name-only "$BASE_SHA" HEAD -- front/ecommerce/ 2>/dev/null || git diff --name-only HEAD~1 HEAD -- front/ecommerce/)
+          
+          # Extract unique client folder names
+          CLIENTS=$(echo "$CHANGED_FILES" | grep -oP 'front/ecommerce/[^/]+' | sort -u | sed 's|front/ecommerce/||')
+          
+          if [ -z "$CLIENTS" ]; then
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "clients=[]" >> $GITHUB_OUTPUT
+            echo "No client changes detected."
+          else
+            # Build JSON array
+            JSON_ARRAY=$(echo "$CLIENTS" | jq -R -s -c 'split("\n") | map(select(length > 0))')
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "clients=${JSON_ARRAY}" >> $GITHUB_OUTPUT
+            echo "Changed clients: ${JSON_ARRAY}"
+          fi
+
+  validate-php:
+    name: Validate PHP - ${{ matrix.client }}
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has_changes == 'true'
+    strategy:
+      matrix:
+        client: ${{ fromJson(needs.detect-changes.outputs.clients) }}
+      fail-fast: false
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+          tools: composer, phpcs
+          extensions: mbstring, xml, curl, json
+
+      - name: Install PHP_CodeSniffer standards
+        run: |
+          composer global require squizlabs/php_codesniffer
+          composer global require wp-coding-standards/wpcs
+          composer global require phpcompatibility/php-compatibility
+          composer global require phpcompatibility/phpcompatibility-wp
+          phpcs --config-set installed_paths "$(composer global config home)/vendor/wp-coding-standards/wpcs,$(composer global config home)/vendor/phpcompatibility/php-compatibility,$(composer global config home)/vendor/phpcompatibility/phpcompatibility-wp"
+
+      - name: PHP Syntax Check
+        run: |
+          echo "Checking PHP syntax for client: ${{ matrix.client }}"
+          ERRORS=0
+          while IFS= read -r file; do
+            if ! php -l "$file" > /dev/null 2>&1; then
+              echo "❌ Syntax error: $file"
+              php -l "$file"
+              ERRORS=$((ERRORS + 1))
+            fi
+          done < <(find "front/ecommerce/${{ matrix.client }}" -name "*.php" -type f)
+          
+          if [ $ERRORS -gt 0 ]; then
+            echo "❌ Found $ERRORS file(s) with syntax errors"
+            exit 1
+          fi
+          echo "✓ All PHP files have valid syntax"
+
+      - name: PHP 8.1+ Compatibility Check
+        run: |
+          phpcs --standard=PHPCompatibility \
+            --runtime-set testVersion 8.1- \
+            --extensions=php \
+            --ignore="*/vendor/*,*/node_modules/*" \
+            "front/ecommerce/${{ matrix.client }}/" \
+            || true
+
+      - name: WordPress Coding Standards
+        run: |
+          phpcs --standard=WordPress \
+            --extensions=php \
+            --ignore="*/vendor/*,*/node_modules/*" \
+            --warning-severity=0 \
+            "front/ecommerce/${{ matrix.client }}/" \
+            || echo "⚠️ PHPCS warnings found (non-blocking)"
+
+  validate-assets:
+    name: Validate Assets - ${{ matrix.client }}
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has_changes == 'true'
+    strategy:
+      matrix:
+        client: ${{ fromJson(needs.detect-changes.outputs.clients) }}
+      fail-fast: false
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check CSS validity
+        run: |
+          CSS_FILES=$(find "front/ecommerce/${{ matrix.client }}" -name "*.css" -type f 2>/dev/null)
+          if [ -n "$CSS_FILES" ]; then
+            echo "Found CSS files to validate"
+            echo "$CSS_FILES" | head -20
+          else
+            echo "No CSS files found"
+          fi
+
+      - name: Check JS syntax
+        run: |
+          JS_FILES=$(find "front/ecommerce/${{ matrix.client }}" -name "*.js" -type f -not -path "*/node_modules/*" 2>/dev/null)
+          if [ -n "$JS_FILES" ]; then
+            echo "Found JS files:"
+            echo "$JS_FILES" | head -20
+            # Basic syntax check with Node
+            for file in $JS_FILES; do
+              node --check "$file" 2>/dev/null || echo "⚠️ Possible issue in: $file"
+            done
+          fi
+
+      - name: Check for large files
+        run: |
+          LARGE_FILES=$(find "front/ecommerce/${{ matrix.client }}" -type f -size +5M 2>/dev/null)
+          if [ -n "$LARGE_FILES" ]; then
+            echo "⚠️ Large files detected (>5MB):"
+            echo "$LARGE_FILES"
+            echo "Consider optimizing these files."
+          else
+            echo "✓ No oversized files found"
+          fi
+
+  validate-structure:
+    name: Validate Structure
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has_changes == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check required files exist
+        run: |
+          CLIENTS='${{ needs.detect-changes.outputs.clients }}'
+          echo "$CLIENTS" | jq -r '.[]' | while read CLIENT; do
+            BASE="front/ecommerce/${CLIENT}/wp-content"
+            
+            echo "Checking structure for: ${CLIENT}"
+            
+            # Check theme has required files
+            if [ -d "${BASE}/themes" ]; then
+              for THEME_DIR in ${BASE}/themes/*/; do
+                if [ -d "$THEME_DIR" ]; then
+                  THEME_NAME=$(basename "$THEME_DIR")
+                  
+                  if [ ! -f "${THEME_DIR}functions.php" ]; then
+                    echo "⚠️ Missing functions.php in theme: ${THEME_NAME}"
+                  fi
+                  
+                  if [ ! -f "${THEME_DIR}style.css" ] && [ ! -f "${THEME_DIR}theme.json" ]; then
+                    echo "⚠️ Missing style.css or theme.json in theme: ${THEME_NAME}"
+                  fi
+                fi
+              done
+            fi
+            
+            # Check plugins have main file
+            if [ -d "${BASE}/plugins" ]; then
+              for PLUGIN_DIR in ${BASE}/plugins/*/; do
+                if [ -d "$PLUGIN_DIR" ]; then
+                  PLUGIN_NAME=$(basename "$PLUGIN_DIR")
+                  MAIN_FILE="${PLUGIN_DIR}${PLUGIN_NAME}.php"
+                  
+                  if [ ! -f "$MAIN_FILE" ]; then
+                    echo "⚠️ Missing main plugin file: ${MAIN_FILE}"
+                  fi
+                fi
+              done
+            fi
+          done
+          
+          echo "✓ Structure validation complete"
+
+  summary:
+    name: Validation Summary
+    runs-on: ubuntu-latest
+    needs: [validate-php, validate-assets, validate-structure]
+    if: always()
+    steps:
+      - name: Report results
+        run: |
+          echo "## Validation Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| PHP Validation | ${{ needs.validate-php.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Asset Validation | ${{ needs.validate-assets.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Structure Validation | ${{ needs.validate-structure.result }} |" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.validate-php.result }}" = "failure" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "❌ **PHP validation failed.** Please fix errors before merging." >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi

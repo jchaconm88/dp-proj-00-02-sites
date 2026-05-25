@@ -1,0 +1,37 @@
+<!-- wp:template-part {"slug":"header","tagName":"header"} /-->
+
+<!-- wp:group {"tagName":"main","layout":{"type":"constrained"}} -->
+<main class="wp-block-group">
+	<!-- wp:group {"style":{"spacing":{"padding":{"top":"var:preset|spacing|70","bottom":"var:preset|spacing|70"}}}} -->
+	<div class="wp-block-group" style="padding-top:var(--wp--preset--spacing--70);padding-bottom:var(--wp--preset--spacing--70)">
+		<!-- wp:heading {"textAlign":"center","level":1,"style":{"typography":{"fontSize":"var(--wp--preset--font-size--display)","fontFamily":"var(--wp--preset--font-family--heading)"},"color":{"text":"var(--wp--preset--color--primary)"}}} -->
+		<h1 class="wp-block-heading has-text-align-center" style="color:var(--wp--preset--color--primary);font-size:var(--wp--preset--font-size--display);font-family:var(--wp--preset--font-family--heading)">404</h1>
+		<!-- /wp:heading -->
+
+		<!-- wp:heading {"textAlign":"center","level":2,"style":{"typography":{"fontSize":"var(--wp--preset--font-size--x-large)"},"spacing":{"margin":{"top":"var:preset|spacing|20","bottom":"var:preset|spacing|30"}}}} -->
+		<h2 class="wp-block-heading has-text-align-center" style="font-size:var(--wp--preset--font-size--x-large);margin-top:var(--wp--preset--spacing--20);margin-bottom:var(--wp--preset--spacing--30)">Página no encontrada</h2>
+		<!-- /wp:heading -->
+
+		<!-- wp:paragraph {"align":"center","style":{"typography":{"fontSize":"var(--wp--preset--font-size--large)"},"spacing":{"margin":{"bottom":"var:preset|spacing|40"}}}} -->
+		<p class="has-text-align-center" style="font-size:var(--wp--preset--font-size--large);margin-bottom:var(--wp--preset--spacing--40)">Lo sentimos, la página que buscas no existe o ha sido movida.</p>
+		<!-- /wp:paragraph -->
+
+		<!-- wp:search {"label":"Buscar","placeholder":"Buscar en el sitio...","buttonText":"Buscar","buttonPosition":"button-inside","style":{"border":{"radius":"var(--wp--custom--border-radius--sm)"}}} /-->
+
+		<!-- wp:buttons {"layout":{"type":"flex","justifyContent":"center"},"style":{"spacing":{"margin":{"top":"var:preset|spacing|40"}}}} -->
+		<div class="wp-block-buttons" style="margin-top:var(--wp--preset--spacing--40)">
+			<!-- wp:button {"backgroundColor":"accent","textColor":"background","style":{"border":{"radius":"var(--wp--custom--border-radius--sm)"}}} -->
+			<div class="wp-block-button"><a class="wp-block-button__link has-background-color has-accent-background-color has-text-color has-background wp-element-button" style="border-radius:var(--wp--custom--border-radius--sm)" href="/">Volver al inicio</a></div>
+			<!-- /wp:button -->
+
+			<!-- wp:button {"backgroundColor":"primary","textColor":"on-primary","style":{"border":{"radius":"var(--wp--custom--border-radius--sm)"}}} -->
+			<div class="wp-block-button"><a class="wp-block-button__link has-on-primary-color has-primary-background-color has-text-color has-background wp-element-button" style="border-radius:var(--wp--custom--border-radius--sm)" href="/tienda">Ver tienda</a></div>
+			<!-- /wp:button -->
+		</div>
+		<!-- /wp:buttons -->
+	</div>
+	<!-- /wp:group -->
+</main>
+<!-- /wp:group -->
+
+<!-- wp:template-part {"slug":"footer","tagName":"footer"} /-->

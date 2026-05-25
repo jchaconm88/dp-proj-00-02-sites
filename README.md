@@ -1,0 +1,135 @@
+# Proyecto Agencia Web — WordPress
+
+## Descripción
+
+Monorepo para una agencia web dedicada a la venta de sitios web construidos con WordPress + WooCommerce, orientado al mercado peruano. El proyecto organiza múltiples clientes en dos módulos principales: plantillas de diseño (mockups HTML, capturas y documentación visual) y temas WordPress listos para despliegue en producción. La arquitectura monorepo permite compartir configuraciones, scripts de automatización y mantener correspondencia directa entre diseños e implementaciones.
+
+## Estructura de Carpetas
+
+```
+dp-proj-00-04/
+├── templates/                        # Módulo de plantillas de diseño
+│   └── [hostname]/                   # Carpeta por cliente (ej: mi-cliente.local)
+│       ├── design/                   # Archivos de diseño (requerido)
+│       │   ├── code.html             # Mockup HTML del diseño
+│       │   ├── DESIGN.md             # Tokens de diseño (colores, tipografía, espaciado)
+│       │   └── screen.png            # Captura de pantalla del diseño
+│       └── components/               # Opcional: plantillas HTML empaquetables
+├── front/                            # Módulo de temas WordPress
+│   └── [hostname]/                   # Carpeta por cliente (mismo hostname que templates/)
+│       └── wp-content/
+│           └── themes/
+│               └── [theme-name]/     # Tema WordPress FSE
+│                   ├── style.css
+│                   ├── functions.php
+│                   ├── theme.json
+│                   ├── templates/
+│                   ├── parts/
+│                   ├── patterns/
+│                   └── assets/
+├── scripts/                          # Scripts de automatización
+│   ├── validate-hostname.js          # Validación de formato de hostname
+│   ├── validate-structure.ps1        # Validación de estructura del monorepo
+│   ├── transfer-tokens.js            # Transferencia de tokens diseño → theme.json
+│   ├── compare-screenshots.js        # Comparación visual diseño vs implementación
+│   └── package-template.ps1          # Empaquetado de templates en ZIP
+├── .github/
+│   └── workflows/                    # Pipelines CI/CD
+│       ├── deploy-staging.yml
+│       └── deploy-production.yml
+├── .editorconfig                     # Reglas de formato compartidas
+├── .gitignore                        # Exclusiones globales
+├── CLIENTS.md                        # Registro central de clientes
+├── WORKFLOW.md                       # Flujo de trabajo documentado
+├── PLUGINS.md                        # Plugins recomendados por tipo de sitio
+├── package.json                      # Configuración npm con workspaces
+└── README.md                         # Este archivo
+```
+
+## Convención de Nombres
+
+Las carpetas de cliente en `templates/` y `front/` se nombran usando el **hostname del dominio** del cliente. El formato debe cumplir:
+
+- Solo caracteres en **minúsculas** (lowercase)
+- Solo caracteres **alfanuméricos**, **guiones** (`-`) y **puntos** (`.`)
+- Máximo **63 caracteres** por segmento (cada parte separada por puntos)
+- Máximo **253 caracteres** en total
+- Debe incluir un **TLD** (top-level domain), por ejemplo `.local`, `.com`, `.pe`
+- No puede comenzar ni terminar con guión en ningún segmento
+
+**Ejemplos válidos:**
+
+- `mi-cliente.local`
+- `tienda-ropa.com.pe`
+- `zapatillas-peru.local`
+
+**Ejemplos inválidos:**
+
+- `Mi-Cliente.local` (contiene mayúsculas)
+- `-mi-cliente.local` (segmento inicia con guión)
+- `mi_cliente.local` (contiene guión bajo)
+- `micliente` (sin TLD)
+
+## Flujo de Trabajo
+
+El flujo de trabajo entre módulos sigue estas etapas:
+
+```
+Diseño → Aprobación → Transferencia de Tokens → Implementación → Validación
+```
+
+1. **Diseño en Templates**: El diseñador crea el mockup HTML (`code.html`), documenta los tokens de diseño en `DESIGN.md` y genera la captura de referencia (`screen.png`) dentro de `templates/[hostname]/design/`.
+
+2. **Aprobación del diseño**: El cliente o el equipo revisa y aprueba el diseño. Si no se aprueba, se itera sobre el diseño.
+
+3. **Transferencia de tokens**: Se ejecuta el script `transfer-tokens.js` que lee los tokens definidos en `DESIGN.md` (colores, tipografía, espaciado, bordes) y los mapea al archivo `theme.json` del tema WordPress correspondiente en `front/`.
+
+4. **Implementación del tema**: El desarrollador construye el tema WordPress en `front/[hostname]/` utilizando los tokens transferidos, creando templates FSE, patterns y estilos que replican fielmente el diseño aprobado.
+
+5. **Validación de fidelidad**: Se ejecuta el script `compare-screenshots.js` para comparar visualmente la captura del diseño original contra la implementación. Si no coincide dentro del umbral aceptable, se itera sobre la implementación.
+
+6. **Despliegue**: Una vez validado, se hace push a `main` y el pipeline CI/CD (GitHub Actions) despliega automáticamente a staging, y tras aprobación manual, a producción.
+
+## Instrucciones para Nuevo Cliente
+
+### 1. Crear carpeta en el módulo de templates
+
+```bash
+# Reemplazar [hostname] con el dominio del cliente en formato válido
+mkdir -p templates/[hostname]/design
+```
+
+Agregar los archivos base requeridos dentro de `design/`:
+- `code.html` — Mockup HTML del diseño
+- `DESIGN.md` — Documentación de tokens de diseño (colores, tipografía, espaciado)
+- `screen.png` — Captura de pantalla del diseño
+
+### 2. (Opcional) Crear carpeta en el módulo front
+
+Si el cliente requiere un tema WordPress:
+
+```bash
+mkdir -p front/[hostname]/wp-content/themes/[theme-name]
+```
+
+El hostname en `front/` debe ser **idéntico** al usado en `templates/` para mantener la correspondencia 1:1.
+
+### 3. Validar el nombre del cliente
+
+Ejecutar el script de validación para confirmar que el hostname cumple el formato:
+
+```bash
+node scripts/validate-hostname.js [hostname]
+```
+
+### 4. Registrar el cliente
+
+Agregar la entrada correspondiente en `CLIENTS.md` con los datos del nuevo cliente (nombre, hostname, categoría, estado, rutas, fecha de creación).
+
+### 5. Verificar la estructura
+
+Ejecutar la validación de estructura completa del monorepo:
+
+```powershell
+.\scripts\validate-structure.ps1 -MonorepoRoot . -Hostname [hostname]
+```

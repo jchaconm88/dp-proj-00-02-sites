@@ -1,0 +1,399 @@
+/**
+ * Mi Cliente Theme - Interactive Components
+ *
+ * Accordions, tabs, modals, and dynamic product filters.
+ * Graceful degradation: content accessible in static format if JS fails.
+ * Animations target minimum 30 FPS with CLS < 0.1.
+ *
+ * @package Mi_Cliente_Theme
+ * @since 1.0.0
+ */
+
+/* ==========================================================================
+   Accordions (Collapsible Sections)
+   ========================================================================== */
+
+.accordion {
+    border: 1px solid var(--wp--preset--color--surface, #f8f9fa);
+    border-radius: var(--wp--custom--border-radius--DEFAULT, 8px);
+    overflow: hidden;
+}
+
+.accordion__item {
+    border-bottom: 1px solid var(--wp--preset--color--surface, #f8f9fa);
+}
+
+.accordion__item:last-child {
+    border-bottom: none;
+}
+
+.accordion__trigger {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: var(--wp--preset--spacing--30, 16px) var(--wp--preset--spacing--40, 24px);
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-family: var(--wp--preset--font-family--body);
+    font-size: var(--wp--preset--font-size--medium, 16px);
+    font-weight: 600;
+    color: var(--wp--preset--color--on-background, #1a1a2e);
+    text-align: left;
+    transition: background-color 0.2s ease;
+}
+
+.accordion__trigger:hover {
+    background-color: var(--wp--preset--color--surface, #f8f9fa);
+}
+
+.accordion__trigger:focus-visible {
+    outline: 2px solid var(--wp--preset--color--accent, #0f3460);
+    outline-offset: -2px;
+}
+
+.accordion__icon {
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    position: relative;
+    transition: transform 0.3s ease;
+}
+
+.accordion__icon::before,
+.accordion__icon::after {
+    content: '';
+    position: absolute;
+    background-color: currentColor;
+    transition: transform 0.3s ease;
+}
+
+.accordion__icon::before {
+    top: 50%;
+    left: 2px;
+    right: 2px;
+    height: 2px;
+    transform: translateY(-50%);
+}
+
+.accordion__icon::after {
+    left: 50%;
+    top: 2px;
+    bottom: 2px;
+    width: 2px;
+    transform: translateX(-50%);
+}
+
+.accordion__trigger[aria-expanded="true"] .accordion__icon::after {
+    transform: translateX(-50%) rotate(90deg);
+    opacity: 0;
+}
+
+.accordion__panel {
+    overflow: hidden;
+    transition: max-height 0.3s ease, padding 0.3s ease;
+    max-height: 0;
+    padding: 0 var(--wp--preset--spacing--40, 24px);
+}
+
+.accordion__panel[aria-hidden="false"] {
+    max-height: 1000px;
+    padding: var(--wp--preset--spacing--30, 16px) var(--wp--preset--spacing--40, 24px);
+}
+
+/* Graceful degradation: show all content when JS is disabled */
+.no-js .accordion__panel {
+    max-height: none;
+    padding: var(--wp--preset--spacing--30, 16px) var(--wp--preset--spacing--40, 24px);
+}
+
+.no-js .accordion__icon {
+    display: none;
+}
+
+/* ==========================================================================
+   Tabs (Tabbed Content)
+   ========================================================================== */
+
+.tabs {
+    width: 100%;
+}
+
+.tabs__list {
+    display: flex;
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    border-bottom: 2px solid var(--wp--preset--color--surface, #f8f9fa);
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.tabs__list::-webkit-scrollbar {
+    display: none;
+}
+
+.tabs__tab {
+    padding: var(--wp--preset--spacing--20, 8px) var(--wp--preset--spacing--40, 24px);
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    cursor: pointer;
+    font-family: var(--wp--preset--font-family--body);
+    font-size: var(--wp--preset--font-size--medium, 16px);
+    font-weight: 500;
+    color: var(--wp--preset--color--on-background, #1a1a2e);
+    white-space: nowrap;
+    transition: color 0.2s ease, border-color 0.2s ease;
+}
+
+.tabs__tab:hover {
+    color: var(--wp--preset--color--accent, #0f3460);
+}
+
+.tabs__tab:focus-visible {
+    outline: 2px solid var(--wp--preset--color--accent, #0f3460);
+    outline-offset: -2px;
+}
+
+.tabs__tab[aria-selected="true"] {
+    color: var(--wp--preset--color--accent, #0f3460);
+    border-bottom-color: var(--wp--preset--color--accent, #0f3460);
+}
+
+.tabs__panel {
+    display: none;
+    padding: var(--wp--preset--spacing--40, 24px) 0;
+    animation: tabFadeIn 0.3s ease;
+}
+
+.tabs__panel[aria-hidden="false"] {
+    display: block;
+}
+
+@keyframes tabFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Graceful degradation: show all panels when JS is disabled */
+.no-js .tabs__panel {
+    display: block;
+    border-bottom: 1px solid var(--wp--preset--color--surface, #f8f9fa);
+    padding-bottom: var(--wp--preset--spacing--30, 16px);
+    margin-bottom: var(--wp--preset--spacing--30, 16px);
+}
+
+.no-js .tabs__list {
+    display: none;
+}
+
+/* ==========================================================================
+   Modals (Popup Dialogs)
+   ========================================================================== */
+
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: rgba(0, 0, 0, 0.5);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.3s ease, visibility 0.3s ease;
+    padding: var(--wp--preset--spacing--30, 16px);
+}
+
+.modal-overlay[aria-hidden="false"] {
+    opacity: 1;
+    visibility: visible;
+}
+
+.modal {
+    position: relative;
+    width: 100%;
+    max-width: 600px;
+    max-height: 90vh;
+    overflow-y: auto;
+    background-color: var(--wp--preset--color--background, #ffffff);
+    border-radius: var(--wp--custom--border-radius--lg, 16px);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.2);
+    transform: scale(0.95) translateY(8px);
+    transition: transform 0.3s ease;
+}
+
+.modal-overlay[aria-hidden="false"] .modal {
+    transform: scale(1) translateY(0);
+}
+
+.modal__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--wp--preset--spacing--40, 24px);
+    border-bottom: 1px solid var(--wp--preset--color--surface, #f8f9fa);
+}
+
+.modal__title {
+    font-family: var(--wp--preset--font-family--heading);
+    font-size: var(--wp--preset--font-size--large, 18px);
+    font-weight: 700;
+    margin: 0;
+    color: var(--wp--preset--color--primary, #1a1a2e);
+}
+
+.modal__close {
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    border-radius: var(--wp--custom--border-radius--sm, 4px);
+    cursor: pointer;
+    font-size: 24px;
+    line-height: 1;
+    color: var(--wp--preset--color--on-background, #1a1a2e);
+    transition: background-color 0.2s ease;
+}
+
+.modal__close:hover {
+    background-color: var(--wp--preset--color--surface, #f8f9fa);
+}
+
+.modal__close:focus-visible {
+    outline: 2px solid var(--wp--preset--color--accent, #0f3460);
+    outline-offset: 2px;
+}
+
+.modal__body {
+    padding: var(--wp--preset--spacing--40, 24px);
+}
+
+.modal__footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--wp--preset--spacing--20, 8px);
+    padding: var(--wp--preset--spacing--30, 16px) var(--wp--preset--spacing--40, 24px);
+    border-top: 1px solid var(--wp--preset--color--surface, #f8f9fa);
+}
+
+/* Modal size variants */
+.modal--sm {
+    max-width: 400px;
+}
+
+.modal--lg {
+    max-width: 800px;
+}
+
+.modal--full {
+    max-width: 95vw;
+    max-height: 95vh;
+}
+
+/* ==========================================================================
+   Dynamic Product Filters
+   ========================================================================== */
+
+.product-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--wp--preset--spacing--20, 8px);
+    padding: var(--wp--preset--spacing--30, 16px) 0;
+}
+
+.product-filter__btn {
+    padding: var(--wp--preset--spacing--20, 8px) var(--wp--preset--spacing--30, 16px);
+    background-color: var(--wp--preset--color--surface, #f8f9fa);
+    border: 1px solid transparent;
+    border-radius: var(--wp--custom--border-radius--full, 9999px);
+    cursor: pointer;
+    font-family: var(--wp--preset--font-family--body);
+    font-size: var(--wp--preset--font-size--small, 14px);
+    color: var(--wp--preset--color--on-surface, #1a1a2e);
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.product-filter__btn:hover {
+    border-color: var(--wp--preset--color--accent, #0f3460);
+}
+
+.product-filter__btn:focus-visible {
+    outline: 2px solid var(--wp--preset--color--accent, #0f3460);
+    outline-offset: 2px;
+}
+
+.product-filter__btn[aria-pressed="true"],
+.product-filter__btn--active {
+    background-color: var(--wp--preset--color--accent, #0f3460);
+    color: var(--wp--preset--color--background, #ffffff);
+    border-color: var(--wp--preset--color--accent, #0f3460);
+}
+
+/* Filterable items */
+.filterable-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--wp--preset--spacing--40, 24px);
+}
+
+@media (min-width: 768px) {
+    .filterable-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (min-width: 1024px) {
+    .filterable-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}
+
+.filterable-item {
+    transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.filterable-item[aria-hidden="true"] {
+    display: none;
+}
+
+/* Graceful degradation: show all items when JS is disabled */
+.no-js .product-filters {
+    display: none;
+}
+
+.no-js .filterable-item {
+    display: block !important;
+    opacity: 1 !important;
+}
+
+/* ==========================================================================
+   Reduced Motion
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+    .accordion__panel,
+    .accordion__icon,
+    .accordion__icon::before,
+    .accordion__icon::after,
+    .tabs__panel,
+    .modal-overlay,
+    .modal,
+    .filterable-item,
+    .product-filter__btn {
+        transition: none;
+        animation: none;
+    }
+}

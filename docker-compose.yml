@@ -1,0 +1,36 @@
+version: '3.8'
+services:
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: wordpress
+      MYSQL_USER: wp
+      MYSQL_PASSWORD: wp
+    volumes:
+      - db_data:/var/lib/mysql
+    ports:
+      - "3306:3306"
+
+  wordpress:
+    image: wordpress:latest
+    depends_on:
+      - db
+    ports:
+      - "8888:80"
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_USER: wp
+      WORDPRESS_DB_PASSWORD: wp
+      WORDPRESS_DB_NAME: wordpress
+    volumes:
+      # Montar el tema directamente
+      - ./front/ecommerce/mi-cliente.local/wp-content/themes/mi-cliente-theme:/var/www/html/wp-content/themes/mi-cliente-theme
+      # Montar el plugin ERP
+      - ./front/ecommerce/mi-cliente.local/wp-content/plugins/woocommerce-erp-integration:/var/www/html/wp-content/plugins/woocommerce-erp-integration
+      # Persistir uploads y otros datos
+      - wp_data:/var/www/html
+
+volumes:
+  db_data:
+  wp_data:

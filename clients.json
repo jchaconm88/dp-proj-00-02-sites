@@ -1,0 +1,29 @@
+{
+  "description": "Registro central de clientes del proyecto de agencia web WordPress. Cada entrada representa un cliente/sitio web con su estado actual y rutas dentro del monorepo.",
+  "schema": {
+    "clientFields": {
+      "name": "string — Nombre del cliente o proyecto",
+      "hostname": "string — Hostname del dominio en formato lowercase con guiones y TLD",
+      "category": "string — Categoría de negocio (debe ser uno de los valores en 'categories')",
+      "status": "string — Estado actual del proyecto (debe ser uno de los valores en 'statusValues')",
+      "templatePath": "string — Ruta relativa a la carpeta del cliente en el Módulo_Templates",
+      "frontPath": "string — Ruta relativa a la carpeta del cliente en el Módulo_Front",
+      "createdAt": "string (YYYY-MM-DD) — Fecha de creación del registro",
+      "updatedAt": "string (YYYY-MM-DD) — Fecha de última actualización del registro"
+    }
+  },
+  "statusValues": ["diseño", "desarrollo", "revisión", "producción", "archivado"],
+  "categories": ["ecommerce", "portafolio", "landing-page"],
+  "clients": [
+    {
+      "name": "Mi Cliente",
+      "hostname": "mi-cliente.local",
+      "category": "ecommerce",
+      "status": "desarrollo",
+      "templatePath": "templates/ecommerce/mi-cliente.local/",
+      "frontPath": "front/ecommerce/mi-cliente.local/",
+      "createdAt": "2024-01-15",
+      "updatedAt": "2024-03-20"
+    }
+  ]
+}

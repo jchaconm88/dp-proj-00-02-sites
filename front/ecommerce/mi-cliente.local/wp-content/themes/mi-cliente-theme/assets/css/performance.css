@@ -1,0 +1,240 @@
+/**
+ * Mi Cliente Theme - Performance Optimizations
+ *
+ * Lazy loading styles, critical CSS inlining approach,
+ * and WebP/AVIF fallback patterns using <picture> elements.
+ *
+ * @package Mi_Cliente_Theme
+ * @since 1.0.0
+ */
+
+/* ==========================================================================
+   Lazy Loading - Placeholder / Skeleton Styles
+   ========================================================================== */
+
+/* Image placeholder while loading */
+.lazy-image {
+    position: relative;
+    overflow: hidden;
+    background-color: var(--wp--preset--color--surface, #f8f9fa);
+}
+
+.lazy-image img {
+    transition: opacity 0.3s ease;
+}
+
+.lazy-image img[loading="lazy"]:not(.loaded) {
+    opacity: 0;
+}
+
+.lazy-image img.loaded {
+    opacity: 1;
+}
+
+/* Skeleton placeholder animation */
+.skeleton {
+    position: relative;
+    overflow: hidden;
+    background-color: var(--wp--preset--color--surface, #f8f9fa);
+    border-radius: var(--wp--custom--border-radius--sm, 4px);
+}
+
+.skeleton::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+        90deg,
+        transparent 0%,
+        rgba(255, 255, 255, 0.4) 50%,
+        transparent 100%
+    );
+    animation: skeletonShimmer 1.5s infinite;
+    will-change: transform;
+}
+
+@keyframes skeletonShimmer {
+    0% {
+        transform: translateX(-100%);
+    }
+    100% {
+        transform: translateX(100%);
+    }
+}
+
+/* Skeleton variants */
+.skeleton--text {
+    height: 1em;
+    margin-bottom: 0.5em;
+    width: 100%;
+}
+
+.skeleton--text:last-child {
+    width: 60%;
+}
+
+.skeleton--heading {
+    height: 1.5em;
+    width: 40%;
+    margin-bottom: 1em;
+}
+
+.skeleton--image {
+    aspect-ratio: 16 / 9;
+    width: 100%;
+}
+
+.skeleton--avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+}
+
+.skeleton--card {
+    padding: var(--wp--preset--spacing--40, 24px);
+    border-radius: var(--wp--custom--border-radius--DEFAULT, 8px);
+}
+
+/* Aspect ratio containers for lazy images (prevents CLS) */
+.aspect-ratio-16-9 {
+    aspect-ratio: 16 / 9;
+}
+
+.aspect-ratio-4-3 {
+    aspect-ratio: 4 / 3;
+}
+
+.aspect-ratio-1-1 {
+    aspect-ratio: 1 / 1;
+}
+
+.aspect-ratio-3-2 {
+    aspect-ratio: 3 / 2;
+}
+
+/* Ensure images fill their containers */
+.lazy-image img,
+[class*="aspect-ratio-"] img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+/* ==========================================================================
+   Critical CSS Inlining Approach
+   ========================================================================== */
+
+/*
+ * Critical CSS Strategy:
+ * The theme uses a two-phase loading approach:
+ *
+ * 1. Critical (above-the-fold) styles are inlined in <head> via
+ *    mi_cliente_theme_inline_critical_css() in functions.php
+ *
+ * 2. Non-critical styles are loaded asynchronously using:
+ *    <link rel="preload" as="style" onload="this.onload=null;this.rel='stylesheet'">
+ *    <noscript><link rel="stylesheet" href="..."></noscript>
+ *
+ * The classes below support this pattern.
+ */
+
+/* Above-the-fold content markers */
+.above-fold {
+    contain: layout style;
+}
+
+/* Below-fold content can be deferred */
+.below-fold {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 500px;
+}
+
+/* ==========================================================================
+   WebP / AVIF with JPEG/PNG Fallback Patterns
+   ========================================================================== */
+
+/*
+ * Usage with <picture> element:
+ *
+ * <picture class="responsive-image">
+ *   <source srcset="image.avif" type="image/avif">
+ *   <source srcset="image.webp" type="image/webp">
+ *   <img src="image.jpg" alt="Description" loading="lazy" decoding="async">
+ * </picture>
+ */
+
+.responsive-image {
+    display: block;
+    width: 100%;
+    line-height: 0;
+}
+
+.responsive-image img {
+    width: 100%;
+    height: auto;
+    display: block;
+}
+
+/* Responsive image with fixed aspect ratio (prevents CLS) */
+.responsive-image--fixed {
+    position: relative;
+    overflow: hidden;
+}
+
+.responsive-image--fixed img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+/* Background image with modern format support via CSS */
+.bg-image-modern {
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+}
+
+/* ==========================================================================
+   Content Visibility for Performance
+   ========================================================================== */
+
+/* Sections far below the fold */
+.content-deferred {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 300px;
+}
+
+/* Footer and non-critical sections */
+.content-deferred--footer {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 200px;
+}
+
+/* ==========================================================================
+   Font Loading Optimization
+   ========================================================================== */
+
+/* Prevent FOIT (Flash of Invisible Text) */
+.fonts-loading body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.fonts-loaded body {
+    font-family: var(--wp--preset--font-family--body);
+}
+
+/* ==========================================================================
+   Reduced Motion - Disable skeleton animations
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+    .skeleton::after {
+        animation: none;
+    }
+
+    .lazy-image img {
+        transition: none;
+    }
+}
