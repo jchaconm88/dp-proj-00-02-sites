@@ -4,6 +4,96 @@
 
 Monorepo para una agencia web dedicada a la venta de sitios web construidos con WordPress + WooCommerce, orientado al mercado peruano. El proyecto organiza múltiples clientes en dos módulos principales: plantillas de diseño (mockups HTML, capturas y documentación visual) y temas WordPress listos para despliegue en producción. La arquitectura monorepo permite compartir configuraciones, scripts de automatización y mantener correspondencia directa entre diseños e implementaciones.
 
+## Modo local (Docker) — probar cambios de tema y plugin
+
+Este repo incluye un `docker-compose.yml` para levantar **WordPress + MySQL** en local y montar directamente desde el filesystem:
+
+- **Tema**: `front/ecommerce/mi-cliente.local/wp-content/themes/mi-cliente-theme`
+- **Plugin**: `front/ecommerce/mi-cliente.local/wp-content/plugins/woocommerce-erp-integration`
+
+Así, cualquier cambio que hagas en PHP/CSS/plantillas se refleja inmediatamente al recargar el navegador (sin rebuild).
+
+### Requisitos
+
+- Docker Desktop corriendo.
+- Node 18+ (para levantar el backend del ERP del monorepo principal).
+
+### Levantar WordPress
+
+Desde `dp-proj-00-02-sites/`:
+
+```bash
+docker compose up -d
+```
+
+- WordPress: `http://localhost:8888`
+- MySQL: `localhost:3306` (user `wp`, password `wp`, db `wordpress`)
+
+Para detener:
+
+```bash
+docker compose down
+```
+
+Para borrar datos (reset total):
+
+```bash
+docker compose down -v
+```
+
+### Levantar el ERP (backend) en local
+
+El plugin consume la API del ERP (`/api/v1`). En este workspace el backend suele correr en **`PORT=3001`** (ver `dp-proj-00-02-backend/.env`).
+
+Desde la raíz del monorepo `dp-proj-00-02/`:
+
+```bash
+npm run dev:backend
+```
+
+Health check (desde tu PC):
+
+```bash
+curl -i http://localhost:3001/api/v1/health
+```
+
+### Configurar el plugin “ERP Integration” (en WordPress)
+
+En WP Admin:
+
+- Menú: **ERP Integration**
+- Sección: **Conexión API**
+
+Valores típicos en local:
+
+- **URL Base del API**: `http://host.docker.internal:3001/api/v1`
+  - Importante: WordPress corre dentro de Docker, por eso se usa `host.docker.internal` (no `localhost`).
+- **API Key / API Secret**: generados en **Admin → Web → Credenciales de integración** del proyecto principal.
+
+Luego usa:
+
+- **Diagnóstico → Verificar Conexión (health)**: prueba `GET /health`.
+- **Diagnóstico → Probar API Key / Secret**: valida `POST /auth/token` con lo guardado en WP (misma ruta que usa la sync).
+
+### Probar cambios del plugin/tema
+
+- **Plugin**: edita archivos en `.../woocommerce-erp-integration/` y recarga `http://localhost:8888/wp-admin/`.
+- **Tema**: edita el tema y recarga el frontend (`http://localhost:8888/`).
+
+Si cambias lógica de rutas/registración (hooks, endpoints REST WP), puede ser necesario:
+
+- Desactivar/activar el plugin en WP Admin, o
+- Reiniciar contenedor de WordPress:
+
+```bash
+docker compose restart wordpress
+```
+
+### Problemas comunes
+
+- **En tu PC `localhost:8080` responde IIS**: no uses 8080 para el backend local si está ocupado; usa el puerto real del backend (p. ej. `3001`).
+- **El plugin da `degraded` con pocos ms**: significa “HTTP ≠ 200”, no latencia alta. Revisa URL base (`.../api/v1`) y el puerto correcto.
+
 ## Estructura de Carpetas
 
 ```

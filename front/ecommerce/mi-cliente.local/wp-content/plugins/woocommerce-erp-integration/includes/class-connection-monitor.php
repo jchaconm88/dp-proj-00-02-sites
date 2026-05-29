@@ -98,59 +98,14 @@ class ConnectionMonitor {
     }
 
     /**
-     * Initialize hooks for connection monitoring.
+     * Initialize passive connection monitoring (sin cron).
+     *
+     * No registra crons. El estado de conexión se actualiza pasivamente
+     * desde ERPClient::request() en cada operación real.
      */
     public function init(): void {
-        add_action( 'erp_connection_check', [ $this, 'check_connection' ] );
-
-        // Schedule connection check if not already scheduled.
-        if ( ! wp_next_scheduled( 'erp_connection_check' ) ) {
-            wp_schedule_event( time(), 'every_minute', 'erp_connection_check' );
-        }
-
-        // Register the custom cron interval.
-        add_filter( 'cron_schedules', [ $this, 'register_cron_schedule' ] );
-    }
-
-    /**
-     * Register custom cron schedule for connection monitoring.
-     *
-     * @param array $schedules Existing cron schedules.
-     * @return array Modified schedules.
-     */
-    public function register_cron_schedule( array $schedules ): array {
-        if ( ! isset( $schedules['every_minute'] ) ) {
-            $schedules['every_minute'] = [
-                'interval' => 60,
-                'display'  => __( 'Every Minute', 'wc-erp-integration' ),
-            ];
-        }
-
-        return $schedules;
-    }
-
-    /**
-     * Check the ERP connection status.
-     *
-     * Performs a health check and handles state transitions
-     * between connected and disconnected states.
-     */
-    public function check_connection(): void {
-        try {
-            $health = $this->erp_client->health_check();
-            $is_healthy = ( 'healthy' === ( $health['status'] ?? '' ) );
-        } catch ( \Exception $e ) {
-            $is_healthy = false;
-            $this->log( 'warning', sprintf( 'Health check failed: %s', $e->getMessage() ) );
-        }
-
-        $previous_status = get_option( self::OPTION_CONNECTION_STATUS, 'connected' );
-
-        if ( $is_healthy ) {
-            $this->handle_connected( $previous_status );
-        } else {
-            $this->handle_disconnected( $previous_status );
-        }
+        // No cron — health tracking is passive via ERPClient::request().
+        // Hook opcional para seguimiento manual.
     }
 
     /**
@@ -229,20 +184,7 @@ class ConnectionMonitor {
         // Notify admin of reconnection.
         $this->notify_admin_reconnection( $downtime );
 
-        // Execute full sync to reconcile any missed changes.
-        if ( $this->sync_service ) {
-            $this->log( 'info', 'Initiating full sync after reconnection.' );
-
-            try {
-                $this->sync_service->syncProducts( true );
-                $this->sync_service->syncStock();
-                $this->sync_service->syncPrices();
-            } catch ( \Exception $e ) {
-                $this->log( 'error', sprintf( 'Full sync after reconnection failed: %s', $e->getMessage() ) );
-            }
-        }
-
-        // Process any queued operations that accumulated during downtime.
+        // Process any queued operations that accumulated during downtime (sin full sync).
         $this->sync_queue->process_queue();
     }
 

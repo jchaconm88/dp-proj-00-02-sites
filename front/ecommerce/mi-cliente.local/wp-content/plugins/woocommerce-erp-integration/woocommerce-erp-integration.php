@@ -157,44 +157,25 @@ final class Plugin {
         register_activation_hook( __FILE__, [ $this, 'activate' ] );
         register_deactivation_hook( __FILE__, [ $this, 'deactivate' ] );
 
-        add_filter( 'cron_schedules', [ $this, 'add_cron_schedules' ] );
         add_action( 'plugins_loaded', [ $this, 'init' ] );
         add_action( 'admin_menu', [ $this, 'register_admin_menu' ] );
-    }
-
-    /**
-     * Add custom cron schedules.
-     *
-     * @param array $schedules Existing cron schedules.
-     * @return array Modified schedules.
-     */
-    public function add_cron_schedules( array $schedules ): array {
-        $schedules['five_minutes'] = [
-            'interval' => 300,
-            'display'  => __( 'Every 5 Minutes', 'wc-erp-integration' ),
-        ];
-        $schedules['thirty_minutes'] = [
-            'interval' => 1800,
-            'display'  => __( 'Every 30 Minutes', 'wc-erp-integration' ),
-        ];
-        return $schedules;
+        add_action( 'wp_enqueue_scripts', [ $this, 'enqueue_front_styles' ] );
     }
 
     /**
      * Plugin activation callback.
      *
-     * Creates the sync queue database table and schedules cron events.
+     * Creates the sync queue database table (sin crons de sync — event-driven).
      */
     public function activate(): void {
         $this->create_sync_queue_table();
-        $this->schedule_cron_events();
         flush_rewrite_rules();
     }
 
     /**
      * Plugin deactivation callback.
      *
-     * Clears scheduled cron events.
+     * Clears any remaining scheduled cron events.
      */
     public function deactivate(): void {
         wp_clear_scheduled_hook( 'erp_sync_stock_cron' );
@@ -236,13 +217,41 @@ final class Plugin {
         $this->webhook_handler->set_sync_service( $this->sync_service );
         $this->webhook_handler->init();
 
-        // Initialize connection monitor.
+        // Register cron handler for queued WC→ERP operations (event-driven retry).
+        add_action( 'erp_process_sync_queue', [ $this->sync_queue, 'process_queue' ] );
+
+        // Initialize passive connection monitor (sin cron).
         $this->connection_monitor = new ConnectionMonitor( $this->erp_client, $this->sync_queue );
         $this->connection_monitor->set_sync_service( $this->sync_service );
         $this->connection_monitor->init();
+    }
 
-        // Register cron handlers.
-        add_action( 'erp_process_sync_queue', [ $this->sync_queue, 'process_queue' ] );
+    /**
+     * Hide variation summary attributes duplicated by some themes.
+     *
+     * Some themes render the selected attributes ("Color: Azul", "Talla: S")
+     * and also render the dropdowns, which looks duplicated.
+     */
+    public function enqueue_front_styles(): void {
+        if ( ! function_exists( 'is_product' ) || ! is_product() ) {
+            return;
+        }
+
+        $css = '
+            .single-product .single_variation .woocommerce-variation-attributes,
+            .single-product .single_variation .woocommerce-variation-attributes-wrapper {
+                display: none !important;
+            }
+            .single-product .single_variation dl.variation,
+            .single-product .single_variation .woocommerce-variation-description dl.variation,
+            .single-product .single_variation .woocommerce-variation-description .variation {
+                display: none !important;
+            }
+        ';
+
+        wp_register_style( 'agencia-erp-frontend', false, [], AGENCIA_ERP_VERSION );
+        wp_enqueue_style( 'agencia-erp-frontend' );
+        wp_add_inline_style( 'agencia-erp-frontend', $css );
     }
 
     /**
@@ -366,23 +375,6 @@ final class Plugin {
         dbDelta( $sql );
     }
 
-    /**
-     * Schedule cron events for periodic sync.
-     */
-    private function schedule_cron_events(): void {
-        if ( ! wp_next_scheduled( 'erp_sync_stock_cron' ) ) {
-            wp_schedule_event( time(), 'five_minutes', 'erp_sync_stock_cron' );
-        }
-        if ( ! wp_next_scheduled( 'erp_sync_products_cron' ) ) {
-            wp_schedule_event( time(), 'hourly', 'erp_sync_products_cron' );
-        }
-        if ( ! wp_next_scheduled( 'erp_sync_prices_cron' ) ) {
-            wp_schedule_event( time(), 'thirty_minutes', 'erp_sync_prices_cron' );
-        }
-        if ( ! wp_next_scheduled( 'erp_process_sync_queue' ) ) {
-            wp_schedule_event( time(), 'five_minutes', 'erp_process_sync_queue' );
-        }
-    }
 }
 
 // Initialize the plugin.

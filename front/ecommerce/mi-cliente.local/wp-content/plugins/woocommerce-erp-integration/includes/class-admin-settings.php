@@ -147,75 +147,12 @@ class AdminSettings {
             ]
         );
 
-        // --- Sync Section ---
+        // --- Sync manual (sin crons) ---
         add_settings_section(
             self::SECTION_SYNC,
-            __( 'Intervalos de Sincronización', 'wc-erp-integration' ),
+            __( 'Sincronización manual (pull)', 'wc-erp-integration' ),
             [ $this, 'render_sync_section' ],
             self::PAGE_SLUG
-        );
-
-        // Stock sync interval.
-        register_setting( self::OPTION_GROUP, 'erp_sync_interval_stock', [
-            'type'              => 'integer',
-            'sanitize_callback' => 'absint',
-            'default'           => 300,
-        ] );
-        add_settings_field(
-            'erp_sync_interval_stock',
-            __( 'Intervalo Sync Stock (seg)', 'wc-erp-integration' ),
-            [ $this, 'render_number_field' ],
-            self::PAGE_SLUG,
-            self::SECTION_SYNC,
-            [
-                'id'          => 'erp_sync_interval_stock',
-                'description' => __( 'Intervalo en segundos para sincronizar inventario. Por defecto: 300 (5 min).', 'wc-erp-integration' ),
-                'min'         => 60,
-                'max'         => 86400,
-                'default'     => 300,
-            ]
-        );
-
-        // Products sync interval.
-        register_setting( self::OPTION_GROUP, 'erp_sync_interval_products', [
-            'type'              => 'integer',
-            'sanitize_callback' => 'absint',
-            'default'           => 3600,
-        ] );
-        add_settings_field(
-            'erp_sync_interval_products',
-            __( 'Intervalo Sync Productos (seg)', 'wc-erp-integration' ),
-            [ $this, 'render_number_field' ],
-            self::PAGE_SLUG,
-            self::SECTION_SYNC,
-            [
-                'id'          => 'erp_sync_interval_products',
-                'description' => __( 'Intervalo en segundos para sincronizar catálogo. Por defecto: 3600 (1 hora).', 'wc-erp-integration' ),
-                'min'         => 300,
-                'max'         => 86400,
-                'default'     => 3600,
-            ]
-        );
-
-        // Prices sync interval.
-        register_setting( self::OPTION_GROUP, 'erp_sync_interval_prices', [
-            'type'              => 'integer',
-            'sanitize_callback' => 'absint',
-            'default'           => 1800,
-        ] );
-        add_settings_field(
-            'erp_sync_interval_prices',
-            __( 'Intervalo Sync Precios (seg)', 'wc-erp-integration' ),
-            [ $this, 'render_number_field' ],
-            self::PAGE_SLUG,
-            self::SECTION_SYNC,
-            [
-                'id'          => 'erp_sync_interval_prices',
-                'description' => __( 'Intervalo en segundos para sincronizar precios. Por defecto: 1800 (30 min).', 'wc-erp-integration' ),
-                'min'         => 300,
-                'max'         => 86400,
-                'default'     => 1800,
-            ]
         );
 
         // Batch size.
@@ -379,8 +316,70 @@ class AdminSettings {
             return;
         }
 
+        $manual_sync_notice      = null;
+        $manual_sync_notice_type = 'info';
+        if ( isset( $_GET['erp_manual_sync'] ) && isset( $_GET['_wpnonce'] ) ) {
+            if ( wp_verify_nonce( sanitize_text_field( wp_unslash( $_GET['_wpnonce'] ) ), 'erp_manual_sync' ) ) {
+                $sync_service = Plugin::get_instance()->get_sync_service();
+                $action     = sanitize_text_field( wp_unslash( $_GET['erp_manual_sync'] ) );
+                if ( $sync_service ) {
+                    try {
+                        if ( 'products' === $action ) {
+                            $sync_results = $sync_service->syncProducts( true );
+                            if ( ! empty( $sync_results['fetch_error'] ) ) {
+                                $manual_sync_notice_type = 'error';
+                                $manual_sync_notice      = sprintf(
+                                    /* translators: %s: error message */
+                                    __( 'No se pudo leer el catálogo del ERP: %s', 'wc-erp-integration' ),
+                                    (string) $sync_results['fetch_error']
+                                );
+                            } elseif ( 0 === (int) ( $sync_results['fetched'] ?? 0 ) ) {
+                                $manual_sync_notice_type = 'warning';
+                                $manual_sync_notice      = __(
+                                    'El ERP respondió con 0 productos. Verifique API Key/Secret (vuelva a pegarlos y guarde), URL base (host.docker.internal:3001/api/v1) y que el backend esté en ejecución.',
+                                    'wc-erp-integration'
+                                );
+                            } else {
+                                $manual_sync_notice_type = ( (int) ( $sync_results['errors'] ?? 0 ) ) > 0 ? 'warning' : 'success';
+                                $manual_sync_notice      = sprintf(
+                                    /* translators: 1: fetched, 2: created, 3: updated, 4: errors, 5: skipped */
+                                    __( 'Catálogo: %1$d recibidos del ERP, %2$d creados, %3$d actualizados, %4$d errores, %5$d omitidos (sin SKU).', 'wc-erp-integration' ),
+                                    (int) ( $sync_results['fetched'] ?? 0 ),
+                                    (int) ( $sync_results['created'] ?? 0 ),
+                                    (int) ( $sync_results['updated'] ?? 0 ),
+                                    (int) ( $sync_results['errors'] ?? 0 ),
+                                    (int) ( $sync_results['skipped'] ?? 0 )
+                                );
+                                if ( ! empty( $sync_results['last_error'] ) ) {
+                                    $manual_sync_notice .= ' ' . sprintf(
+                                        /* translators: %s: error detail */
+                                        __( 'Último error: %s', 'wc-erp-integration' ),
+                                        (string) $sync_results['last_error']
+                                    );
+                                }
+                            }
+                        } elseif ( 'stock' === $action ) {
+                            $sync_service->syncStock();
+                            $manual_sync_notice = __( 'Stock actualizado desde el ERP.', 'wc-erp-integration' );
+                        } elseif ( 'prices' === $action ) {
+                            $sync_service->syncPrices();
+                            $manual_sync_notice = __( 'Precios actualizados desde el ERP.', 'wc-erp-integration' );
+                        }
+                    } catch ( \Throwable $e ) {
+                        $manual_sync_notice_type = 'error';
+                        $manual_sync_notice      = sprintf(
+                            /* translators: %s: error message */
+                            __( 'Error en sincronización: %s', 'wc-erp-integration' ),
+                            $e->getMessage()
+                        );
+                    }
+                }
+            }
+        }
+
         // Handle health check action.
         $health_status = null;
+        $auth_test     = null;
         if ( isset( $_GET['action'] ) && 'health_check' === $_GET['action'] ) {
             check_admin_referer( 'erp_health_check' );
             $erp_client = Plugin::get_instance()->get_erp_client();
@@ -388,10 +387,23 @@ class AdminSettings {
                 $health_status = $erp_client->health_check();
             }
         }
+        if ( isset( $_GET['action'] ) && 'auth_test' === $_GET['action'] ) {
+            check_admin_referer( 'erp_auth_test' );
+            $erp_client = Plugin::get_instance()->get_erp_client();
+            if ( $erp_client ) {
+                $auth_test = $erp_client->test_authentication();
+            }
+        }
 
         ?>
         <div class="wrap">
             <h1><?php esc_html_e( 'ERP Integration Settings', 'wc-erp-integration' ); ?></h1>
+
+            <?php if ( $manual_sync_notice ) : ?>
+                <div class="notice notice-<?php echo esc_attr( $manual_sync_notice_type ); ?> is-dismissible">
+                    <p><?php echo esc_html( $manual_sync_notice ); ?></p>
+                </div>
+            <?php endif; ?>
 
             <?php if ( $health_status ) : ?>
                 <div class="notice notice-<?php echo 'healthy' === $health_status['status'] ? 'success' : 'warning'; ?>">
@@ -408,6 +420,12 @@ class AdminSettings {
                 </div>
             <?php endif; ?>
 
+            <?php if ( is_array( $auth_test ) ) : ?>
+                <div class="notice notice-<?php echo ! empty( $auth_test['ok'] ) ? 'success' : 'error'; ?> is-dismissible">
+                    <p><?php echo esc_html( (string) ( $auth_test['message'] ?? '' ) ); ?></p>
+                </div>
+            <?php endif; ?>
+
             <form method="post" action="options.php">
                 <?php
                 settings_fields( self::OPTION_GROUP );
@@ -417,11 +435,36 @@ class AdminSettings {
             </form>
 
             <hr>
+            <h2><?php esc_html_e( 'Importar desde ERP (manual)', 'wc-erp-integration' ); ?></h2>
+            <p class="description"><?php esc_html_e( 'Sin polling automático. Ejecute solo cuando necesite reconciliar datos.', 'wc-erp-integration' ); ?></p>
+            <p>
+                <?php
+                $base = admin_url( 'admin.php?page=' . self::PAGE_SLUG );
+                $nonce = wp_create_nonce( 'erp_manual_sync' );
+                ?>
+                <a class="button button-secondary" href="<?php echo esc_url( add_query_arg( [ 'erp_manual_sync' => 'products', '_wpnonce' => $nonce ], $base ) ); ?>">
+                    <?php esc_html_e( 'Sincronizar catálogo ahora', 'wc-erp-integration' ); ?>
+                </a>
+                <a class="button button-secondary" href="<?php echo esc_url( add_query_arg( [ 'erp_manual_sync' => 'stock', '_wpnonce' => $nonce ], $base ) ); ?>">
+                    <?php esc_html_e( 'Actualizar stock', 'wc-erp-integration' ); ?>
+                </a>
+                <a class="button button-secondary" href="<?php echo esc_url( add_query_arg( [ 'erp_manual_sync' => 'prices', '_wpnonce' => $nonce ], $base ) ); ?>">
+                    <?php esc_html_e( 'Actualizar precios', 'wc-erp-integration' ); ?>
+                </a>
+            </p>
+
+            <hr>
             <h2><?php esc_html_e( 'Diagnóstico', 'wc-erp-integration' ); ?></h2>
             <p>
                 <a href="<?php echo esc_url( wp_nonce_url( admin_url( 'admin.php?page=' . self::PAGE_SLUG . '&action=health_check' ), 'erp_health_check' ) ); ?>" class="button button-secondary">
-                    <?php esc_html_e( 'Verificar Conexión', 'wc-erp-integration' ); ?>
+                    <?php esc_html_e( 'Verificar Conexión (health)', 'wc-erp-integration' ); ?>
                 </a>
+                <a href="<?php echo esc_url( wp_nonce_url( admin_url( 'admin.php?page=' . self::PAGE_SLUG . '&action=auth_test' ), 'erp_auth_test' ) ); ?>" class="button button-secondary">
+                    <?php esc_html_e( 'Probar API Key / Secret', 'wc-erp-integration' ); ?>
+                </a>
+            </p>
+            <p class="description">
+                <?php esc_html_e( 'Health solo comprueba que el servidor responde. «Probar API Key / Secret» valida las credenciales guardadas en WordPress (igual que la sincronización de catálogo).', 'wc-erp-integration' ); ?>
             </p>
 
             <?php $this->render_queue_stats(); ?>
@@ -440,7 +483,10 @@ class AdminSettings {
      * Render sync section description.
      */
     public function render_sync_section(): void {
-        echo '<p>' . esc_html__( 'Configure los intervalos de sincronización automática entre WooCommerce y el ERP.', 'wc-erp-integration' ) . '</p>';
+        echo '<p>' . esc_html__(
+            'La integración es event-driven: el ERP envía webhooks al cambiar stock/precios. Use estos botones solo para importación inicial o recuperación (sin crons automáticos).',
+            'wc-erp-integration'
+        ) . '</p>';
     }
 
     /**
@@ -618,13 +664,15 @@ class AdminSettings {
      * @return string Encrypted value or existing value.
      */
     public function sanitize_encrypt_credential( string $value ): string {
-        if ( empty( $value ) ) {
+        $value = trim( $value );
+        if ( '' === $value ) {
             // Determine which option we're saving by checking the current filter.
             $option_name = str_replace( 'sanitize_option_', '', current_filter() );
-            return get_option( $option_name, '' );
+            return (string) get_option( $option_name, '' );
         }
 
-        return ERPClient::encrypt_credential( sanitize_text_field( $value ) );
+        // No usar sanitize_text_field: puede alterar secretos hex largos.
+        return ERPClient::encrypt_credential( $value );
     }
 
     /**

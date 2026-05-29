@@ -266,6 +266,7 @@ class OrderSync {
         }
 
         $payload = [
+            'channel'     => 'woocommerce',
             'external_id' => (string) $order->get_id(),
             'customer'    => [
                 'email'      => $order->get_billing_email(),

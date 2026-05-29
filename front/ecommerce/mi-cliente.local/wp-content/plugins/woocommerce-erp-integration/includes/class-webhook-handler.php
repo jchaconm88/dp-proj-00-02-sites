@@ -131,12 +131,22 @@ class WebhookHandler {
         }
 
         // Compute expected signature.
-        $webhook_secret = get_option( 'erp_webhook_secret', '' );
-        if ( empty( $webhook_secret ) ) {
+        // Leer desde opción encriptada (ver AdminSettings: guarda como erp_webhook_secret_encrypted).
+        $encrypted = get_option( 'erp_webhook_secret_encrypted', '' );
+        if ( empty( $encrypted ) ) {
             $this->log( 'error', 'Webhook rejected: webhook secret not configured.' );
             return new \WP_Error(
                 'erp_webhook_misconfigured',
                 __( 'Webhook secret not configured.', 'wc-erp-integration' ),
+                [ 'status' => 500 ]
+            );
+        }
+        $webhook_secret = \AgenciaERP\ERPClient::decrypt_credential( $encrypted );
+        if ( empty( $webhook_secret ) ) {
+            $this->log( 'error', 'Webhook rejected: failed to decrypt webhook secret.' );
+            return new \WP_Error(
+                'erp_webhook_misconfigured',
+                __( 'Webhook secret misconfigured.', 'wc-erp-integration' ),
                 [ 'status' => 500 ]
             );
         }
@@ -385,9 +395,39 @@ class WebhookHandler {
      * @param array $data Price update data.
      */
     private function handle_price_updated( array $data ): void {
-        if ( $this->sync_service ) {
-            $this->sync_service->syncPrices( $data );
+        if ( ! $this->sync_service ) {
+            return;
         }
+
+        if ( ! empty( $data['items'] ) && is_array( $data['items'] ) ) {
+            $this->sync_service->syncPrices( $data );
+            return;
+        }
+
+        $sku = trim( (string) ( $data['sku'] ?? '' ) );
+        if ( $sku === '' ) {
+            return;
+        }
+
+        $prices = [];
+        if ( isset( $data['sale_price'] ) || isset( $data['salePrice'] ) ) {
+            $prices['regular_price'] = $data['sale_price'] ?? $data['salePrice'];
+        }
+        if ( array_key_exists( 'sale_price_promo', $data ) || array_key_exists( 'salePricePromo', $data ) ) {
+            $prices['sale_price'] = $data['sale_price_promo'] ?? $data['salePricePromo'];
+        }
+
+        if ( empty( $prices ) ) {
+            return;
+        }
+
+        $this->sync_service->syncPrices(
+            [
+                'items' => [
+                    $sku => $prices,
+                ],
+            ]
+        );
     }
 
     /**

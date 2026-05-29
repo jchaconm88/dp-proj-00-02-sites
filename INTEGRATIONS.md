@@ -1,14 +1,18 @@
 # Documentación de Integraciones: WooCommerce ↔ ERP
 
+> **Fuente de verdad del contrato HTTP:** OpenAPI en el backend (`GET /api/v1/openapi.json`).  
+> **Modo de sync ERP → tienda:** event-driven (webhooks HMAC); **sin crons** de stock/precios/catálogo. Pull manual solo desde WP Admin.  
+> Ver también: [docs/integracion-erp-api-v1/SPEC_Y_TAREAS.md](../docs/integracion-erp-api-v1/SPEC_Y_TAREAS.md).
+
 ## 1. Resumen de Integraciones
 
 ### Matriz de Puntos de Integración
 
 | # | Integración | Dirección | Método de Sync | Frecuencia/Trigger | Prioridad |
 |---|-------------|-----------|----------------|-------------------|-----------|
-| 1 | Productos y Catálogo | ERP → WC | Polling (delta sync por `updated_at`) | Cada 1 hora (3600s) | Alta |
-| 2 | Inventario/Stock | ERP → WC | Webhook + Polling fallback | Webhook inmediato / Polling cada 5 min (300s) | Crítica |
-| 3 | Precios | ERP → WC | Webhook + Polling fallback | Webhook inmediato / Polling cada 30 min (1800s) | Alta |
+| 1 | Productos y Catálogo | ERP → WC | Webhook + pull manual (`updated_since`) | Manual / eventos ERP | Alta |
+| 2 | Inventario/Stock | ERP → WC | Webhook (`stock_updated`) | Inmediato al mutar inventario ERP | Crítica |
+| 3 | Precios | ERP → WC | Webhook (`price_updated`) | Inmediato al mutar precios ERP | Alta |
 | 4 | Pedidos | WC → ERP | Event-driven (WC hooks) | Inmediato al crear orden | Crítica |
 | 5 | Estado de Pedidos | ERP → WC | Webhook del ERP | Inmediato al cambiar estado | Alta |
 | 6 | Clientes | WC → ERP | Event-driven (WC hooks) | Inmediato al crear/actualizar | Media |

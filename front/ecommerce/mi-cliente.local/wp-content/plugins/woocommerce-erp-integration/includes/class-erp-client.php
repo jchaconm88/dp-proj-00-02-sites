@@ -103,8 +103,8 @@ class ERPClient implements ERPClientInterface {
      * @throws \RuntimeException On authentication failure.
      */
     public function authenticate(): array {
-        $api_key    = $this->decrypt_credential( get_option( self::OPTION_API_KEY, '' ) );
-        $api_secret = $this->decrypt_credential( get_option( self::OPTION_API_SECRET, '' ) );
+        $api_key    = trim( self::decrypt_credential( (string) get_option( self::OPTION_API_KEY, '' ) ) );
+        $api_secret = trim( self::decrypt_credential( (string) get_option( self::OPTION_API_SECRET, '' ) ) );
 
         if ( empty( $api_key ) || empty( $api_secret ) ) {
             throw new \RuntimeException(
@@ -138,18 +138,21 @@ class ERPClient implements ERPClientInterface {
         }
 
         $status_code = wp_remote_retrieve_response_code( $response );
+        $body        = json_decode( wp_remote_retrieve_body( $response ), true );
 
         if ( 200 !== $status_code ) {
+            $detail = is_array( $body ) ? (string) ( $body['detail'] ?? $body['message'] ?? '' ) : '';
             throw new \RuntimeException(
-                sprintf(
-                    /* translators: %d: HTTP status code */
-                    __( 'ERP authentication returned status %d.', 'wc-erp-integration' ),
-                    $status_code
+                trim(
+                    sprintf(
+                        /* translators: 1: HTTP status code, 2: API detail */
+                        __( 'ERP authentication returned status %1$d.%2$s', 'wc-erp-integration' ),
+                        $status_code,
+                        $detail ? ' ' . $detail : ''
+                    )
                 )
             );
         }
-
-        $body = json_decode( wp_remote_retrieve_body( $response ), true );
 
         if ( empty( $body['token'] ) || empty( $body['expires_at'] ) ) {
             throw new \RuntimeException(
@@ -219,9 +222,26 @@ class ERPClient implements ERPClientInterface {
         if ( $since ) {
             $params['updated_since'] = $since;
         }
+        if ( empty( $params['per_page'] ) ) {
+            $params['per_page'] = 100;
+        }
 
-        $response = $this->request( 'GET', '/products', [ 'query' => $params ] );
-        return $response['data'] ?? [];
+        $all_products = [];
+        $page         = 1;
+        $total_pages  = 1;
+
+        do {
+            $params['page'] = $page;
+            $response       = $this->request( 'GET', '/products', [ 'query' => $params ] );
+            $batch          = $response['data'] ?? [];
+            if ( is_array( $batch ) ) {
+                $all_products = array_merge( $all_products, $batch );
+            }
+            $total_pages = max( 1, (int) ( $response['pagination']['total_pages'] ?? 1 ) );
+            $page++;
+        } while ( $page <= $total_pages );
+
+        return $all_products;
     }
 
     /**
@@ -477,7 +497,7 @@ class ERPClient implements ERPClientInterface {
 
             // Handle other client errors (4xx).
             if ( $status_code >= 400 && $status_code < 500 ) {
-                $error_message = $body['message'] ?? __( 'Unknown client error.', 'wc-erp-integration' );
+                $error_message = $body['detail'] ?? $body['message'] ?? $body['title'] ?? __( 'Unknown client error.', 'wc-erp-integration' );
                 throw new \RuntimeException(
                     sprintf(
                         /* translators: 1: status code, 2: error message */
@@ -567,7 +587,7 @@ class ERPClient implements ERPClientInterface {
      * @param string $encrypted_value Base64-encoded encrypted value.
      * @return string Decrypted plain text value.
      */
-    private function decrypt_credential( string $encrypted_value ): string {
+    public static function decrypt_credential( string $encrypted_value ): string {
         if ( empty( $encrypted_value ) ) {
             return '';
         }
@@ -584,7 +604,46 @@ class ERPClient implements ERPClientInterface {
         $encrypted = substr( $data, 16 );
         $decrypted = openssl_decrypt( $encrypted, 'aes-256-cbc', $key, OPENSSL_RAW_DATA, $iv );
 
-        return false !== $decrypted ? $decrypted : '';
+        if ( false !== $decrypted && '' !== $decrypted ) {
+            return $decrypted;
+        }
+
+        // Valor guardado en claro (o AUTH_KEY cambió tras cifrar): usar si parece API key.
+        if ( str_starts_with( $encrypted_value, 'erp_' ) ) {
+            return $encrypted_value;
+        }
+
+        return '';
+    }
+
+    /**
+     * Verify stored credentials against POST /auth/token (for admin diagnostics).
+     *
+     * @return array{ok: bool, message: string}
+     */
+    public function test_authentication(): array {
+        try {
+            $this->token            = null;
+            $this->token_expires_at = 0;
+            delete_option( self::OPTION_AUTH_TOKEN );
+            delete_option( self::OPTION_TOKEN_EXPIRES );
+            $this->authenticate();
+            $key_preview = substr( trim( self::decrypt_credential( (string) get_option( self::OPTION_API_KEY, '' ) ) ), 0, 12 );
+
+            return [
+                'ok'      => true,
+                'message' => sprintf(
+                    /* translators: %s: first chars of API key */
+                    __( 'Autenticación correcta (API Key empieza por %s…).', 'wc-erp-integration' ),
+                    $key_preview
+                ),
+            ];
+        } catch ( \Throwable $e ) {
+            return [
+                'ok'      => false,
+                'message' => $e->getMessage(),
+            ];
+        }
     }
 
     /**
