@@ -56,6 +56,11 @@ class SyncService {
     private const REACTIVATION_THRESHOLD = 1;
 
     /**
+     * Maximum slug length for WooCommerce attribute taxonomies.
+     */
+    private const MAX_TAXONOMY_SLUG_LENGTH = 28;
+
+    /**
      * ERP client instance.
      *
      * @var ERPClient
@@ -81,14 +86,14 @@ class SyncService {
     }
 
     /**
-     * Initialize hooks (sin cron — event-driven via webhooks).
+     * Initialize hooks (sin cron â€” event-driven via webhooks).
      *
-     * Los métodos syncProducts, syncStock, syncPrices se invocan
+     * Los mÃ©todos syncProducts, syncStock, syncPrices se invocan
      * desde WebhookHandler (webhooks entrantes ERP) o manualmente
      * desde Admin. No hay acciones de cron.
      */
     public function init(): void {
-        // Sin acciones de cron — event-driven.
+        // Sin acciones de cron â€” event-driven.
     }
 
     /**
@@ -248,6 +253,13 @@ class SyncService {
 
         if ( ! empty( $erp_product['attribute_labels'] ) && empty( $erp_product['attributeLabels'] ) ) {
             $normalized['attribute_labels'] = $erp_product['attribute_labels'];
+        }
+
+        // Filterable attributes passthrough (already snake_case from API).
+        // Note: if filterable_attributes is absent from API, sync_filterable_attributes
+        // handles null gracefully per Requirement 4.10.
+        if ( ! isset( $normalized['filterable_attribute_labels'] ) ) {
+            $normalized['filterable_attribute_labels'] = [];
         }
 
         return $normalized;
@@ -449,11 +461,28 @@ class SyncService {
             $product->set_category_ids( $this->resolve_category_ids( $product_data['categories'] ) );
         }
 
+        // Sync filterable attributes for simple products.
+        // Requirement 4.10: method handles null/missing filterable_attributes gracefully.
+        $filterable_attributes       = $erp_product['filterable_attributes'] ?? null;
+        $filterable_attribute_labels = $erp_product['filterable_attribute_labels'] ?? [];
+        $attributes = $this->sync_filterable_attributes(
+            $product,
+            $filterable_attributes,
+            $filterable_attribute_labels,
+            []
+        );
+        $product->set_attributes( $attributes );
+
         // Store ERP metadata.
         $product->update_meta_data( '_erp_product_id', $erp_product['id'] ?? '' );
         $product->update_meta_data( '_erp_last_sync', gmdate( 'c' ) );
 
         $product->save();
+
+        // Sync images after save (needs product ID).
+        if ( ! empty( $product_data['images'] ) ) {
+            $this->sync_product_images( $product->get_id(), $product_data['images'] );
+        }
 
         return $product_id ? 'updated' : 'created';
     }
@@ -496,9 +525,26 @@ class SyncService {
 
         // Set up attributes from variations.
         $attributes = $this->build_attributes_from_variations( $erp_product['variations'], $attribute_labels );
+
+        // Sync filterable attributes (after variation attributes, per design).
+        // Requirement 4.10: method handles null/missing filterable_attributes gracefully.
+        $filterable_attributes       = $erp_product['filterable_attributes'] ?? null;
+        $filterable_attribute_labels = $erp_product['filterable_attribute_labels'] ?? [];
+        $attributes = $this->sync_filterable_attributes(
+            $product,
+            $filterable_attributes,
+            $filterable_attribute_labels,
+            $attributes
+        );
+
         $product->set_attributes( $attributes );
 
         $product->save();
+
+        // Sync images after save (needs product ID).
+        if ( ! empty( $product_data['images'] ) ) {
+            $this->sync_product_images( $product->get_id(), $product_data['images'] );
+        }
 
         // Sync each variation.
         $parent_sku = trim( (string) ( $erp_product['sku'] ?? '' ) );
@@ -623,7 +669,7 @@ class SyncService {
             $attribute->set_name( $taxonomy );
             $attribute->set_options( $term_slugs );
             $attribute->set_position( $position++ );
-            // Visible=true hace que algunos temas muestren "Color: ..." además del selector de variaciones.
+            // Visible=true hace que algunos temas muestren "Color: ..." ademÃ¡s del selector de variaciones.
             $attribute->set_visible( false );
             $attribute->set_variation( true );
 
@@ -670,15 +716,32 @@ class SyncService {
      * Register global attribute taxonomy (pa_*) if missing.
      *
      * WooCommerce muestra en la tienda wc_attribute_label( $taxonomy ).
-     * Si solo existe la taxonomía WP pero no la fila en woocommerce_attribute_taxonomies,
-     * el front cae al slug técnico (pa_talla, pa_color).
+     * Si solo existe la taxonomÃ­a WP pero no la fila en woocommerce_attribute_taxonomies,
+     * el front cae al slug tÃ©cnico (pa_talla, pa_color).
      *
-     * @param string $label Human label (e.g. Talla).
+     * @param string $label        Human label (e.g. Talla).
+     * @param bool   $has_archives Whether to enable archives (layered nav). Default false.
      * @return string Taxonomy name (pa_*).
      */
-    private function ensure_global_attribute_taxonomy( string $label ): string {
+    private function ensure_global_attribute_taxonomy( string $label, bool $has_archives = false ): string {
         $label    = trim( $label );
         $slug     = wc_sanitize_taxonomy_name( $label );
+
+        // Truncate slug to 28 characters (WooCommerce taxonomy name limit).
+        if ( strlen( $slug ) > 28 ) {
+            $original_slug = $slug;
+            $slug = substr( $slug, 0, 28 );
+            $this->log(
+                'warning',
+                sprintf(
+                    'Attribute slug truncated from "%s" to "%s" (original label: "%s").',
+                    $original_slug,
+                    $slug,
+                    $label
+                )
+            );
+        }
+
         $taxonomy = 'pa_' . $slug;
 
         if ( '' === $slug ) {
@@ -689,7 +752,7 @@ class SyncService {
 
         /*
          * WooCommerce: wc_create_attribute() falla con "Slug already in use" si taxonomy_exists( pa_* )
-         * pero aún no hay fila en woocommerce_attribute_taxonomies (taxonomía huérfana del plugin antiguo).
+         * pero aÃºn no hay fila en woocommerce_attribute_taxonomies (taxonomÃ­a huÃ©rfana del plugin antiguo).
          * En ese caso hay que insertar la fila, no volver a llamar a wc_create_attribute().
          */
         if ( ! $attr_id && taxonomy_exists( $taxonomy ) ) {
@@ -703,13 +766,13 @@ class SyncService {
                     'slug'         => $slug,
                     'type'         => 'select',
                     'order_by'     => 'menu_order',
-                    'has_archives' => false,
+                    'has_archives' => $has_archives,
                 ]
             );
 
             if ( is_wp_error( $created ) ) {
                 $code = $created->get_error_code();
-                // Taxonomía registrada sin fila WC, o carrera: reintentar resolución / reparación.
+                // TaxonomÃ­a registrada sin fila WC, o carrera: reintentar resoluciÃ³n / reparaciÃ³n.
                 if ( 'invalid_product_attribute_slug_already_exists' === $code ) {
                     $attr_id = $this->repair_orphan_pa_taxonomy_row( $slug, $label );
                 }
@@ -724,6 +787,11 @@ class SyncService {
             }
 
             delete_transient( 'wc_attribute_taxonomies' );
+        }
+
+        // If has_archives requested and taxonomy was already existing, enable archives.
+        if ( $has_archives && $attr_id ) {
+            $this->enable_has_archives_if_needed( $attr_id );
         }
 
         $this->update_global_attribute_label_if_needed( $attr_id, $label );
@@ -750,6 +818,37 @@ class SyncService {
         delete_transient( 'wc_attribute_taxonomies' );
 
         return $taxonomy;
+    }
+
+    /**
+     * Enable has_archives (attribute_public = 1) on an existing attribute taxonomy if not already set.
+     *
+     * Only upgrades from 0 â†’ 1; never downgrades. This respects existing taxonomies
+     * that may have been registered by the theme or other plugins.
+     *
+     * @param int $attr_id WooCommerce attribute taxonomy ID.
+     */
+    private function enable_has_archives_if_needed( int $attr_id ): void {
+        global $wpdb;
+
+        $table   = $wpdb->prefix . 'woocommerce_attribute_taxonomies';
+        $current = $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT attribute_public FROM {$table} WHERE attribute_id = %d",
+                $attr_id
+            )
+        );
+
+        if ( null !== $current && (int) $current === 0 ) {
+            $wpdb->update(
+                $table,
+                [ 'attribute_public' => 1 ],
+                [ 'attribute_id' => $attr_id ],
+                [ '%d' ],
+                [ '%d' ]
+            );
+            delete_transient( 'wc_attribute_taxonomies' );
+        }
     }
 
     /**
@@ -782,8 +881,8 @@ class SyncService {
     }
 
     /**
-     * Si existe la taxonomía pa_{slug} pero no la fila en woocommerce_attribute_taxonomies,
-     * inserta la fila como haría wc_create_attribute (sin pasar la validación taxonomy_exists).
+     * Si existe la taxonomÃ­a pa_{slug} pero no la fila en woocommerce_attribute_taxonomies,
+     * inserta la fila como harÃ­a wc_create_attribute (sin pasar la validaciÃ³n taxonomy_exists).
      *
      * @param string $slug  attribute_name (sin prefijo pa_).
      * @param string $label attribute_label.
@@ -818,7 +917,7 @@ class SyncService {
         );
 
         if ( false === $inserted ) {
-            // Posible carrera: la fila apareció entre medias.
+            // Posible carrera: la fila apareciÃ³ entre medias.
             $retry = $wpdb->get_var(
                 $wpdb->prepare(
                     "SELECT attribute_id FROM {$table} WHERE attribute_name = %s LIMIT 1",
@@ -924,6 +1023,7 @@ class SyncService {
             'weight'            => (string) ( $erp_product['weight'] ?? $erp_product['weight_kg'] ?? '' ),
             'status'            => $this->map_erp_status( (string) $erp_status ),
             'categories'        => $erp_product['categories'] ?? $erp_product['category_path'] ?? [],
+            'images'            => $erp_product['images'] ?? $erp_product['image_urls'] ?? [],
         ];
     }
 
@@ -1036,6 +1136,558 @@ class SyncService {
 
         $product->update_meta_data( '_erp_price_last_sync', gmdate( 'c' ) );
         $product->save();
+    }
+
+    /**
+     * Sync product images from external URLs into WP Media Library.
+     *
+     * Downloads images from the ERP URLs, attaches them to the product,
+     * sets the first image as featured (thumbnail), and the rest as gallery.
+     *
+     * @param int   $product_id WooCommerce product ID.
+     * @param array $image_urls Array of public image URLs from the ERP.
+     */
+    private function sync_product_images( int $product_id, array $image_urls ): void {
+        if ( empty( $image_urls ) || ! $product_id ) {
+            return;
+        }
+
+        // Require WordPress media functions.
+        if ( ! function_exists( 'media_sideload_image' ) ) {
+            require_once ABSPATH . 'wp-admin/includes/media.php';
+            require_once ABSPATH . 'wp-admin/includes/file.php';
+            require_once ABSPATH . 'wp-admin/includes/image.php';
+        }
+
+        // Get existing ERP-synced image URLs to avoid re-downloading.
+        $existing_erp_urls = (array) get_post_meta( $product_id, '_erp_synced_image_urls', true );
+        if ( ! is_array( $existing_erp_urls ) ) {
+            $existing_erp_urls = [];
+        }
+
+        // If the image set hasn't changed, skip.
+        if ( $existing_erp_urls === $image_urls ) {
+            return;
+        }
+
+        $attachment_ids = [];
+
+        foreach ( $image_urls as $url ) {
+            $url = trim( (string) $url );
+            if ( empty( $url ) ) {
+                continue;
+            }
+
+            // Check if we already have this URL imported as an attachment.
+            $existing_id = $this->find_attachment_by_erp_url( $url );
+            if ( $existing_id ) {
+                $attachment_ids[] = $existing_id;
+                continue;
+            }
+
+            // Download and sideload the image.
+            $attachment_id = media_sideload_image( $url, $product_id, '', 'id' );
+            if ( is_wp_error( $attachment_id ) ) {
+                $this->log( 'warning', sprintf(
+                    'Failed to sideload image for product %d: %s (URL: %s)',
+                    $product_id,
+                    $attachment_id->get_error_message(),
+                    $url
+                ) );
+                continue;
+            }
+
+            // Store the ERP URL as meta on the attachment for future lookups.
+            update_post_meta( $attachment_id, '_erp_source_url', $url );
+            $attachment_ids[] = $attachment_id;
+        }
+
+        if ( empty( $attachment_ids ) ) {
+            return;
+        }
+
+        // First image = featured (thumbnail).
+        set_post_thumbnail( $product_id, $attachment_ids[0] );
+
+        // Remaining images = gallery.
+        $gallery_ids = array_slice( $attachment_ids, 1 );
+        $product = wc_get_product( $product_id );
+        if ( $product ) {
+            $product->set_gallery_image_ids( $gallery_ids );
+            $product->save();
+        }
+
+        // Store the synced URLs for change detection on next sync.
+        update_post_meta( $product_id, '_erp_synced_image_urls', $image_urls );
+    }
+
+    /**
+     * Find an existing attachment by its ERP source URL.
+     *
+     * @param string $url The original ERP image URL.
+     * @return int|null Attachment ID or null if not found.
+     */
+    private function find_attachment_by_erp_url( string $url ): ?int {
+        global $wpdb;
+        $attachment_id = $wpdb->get_var( $wpdb->prepare(
+            "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = '_erp_source_url' AND meta_value = %s LIMIT 1",
+            $url
+        ) );
+        return $attachment_id ? (int) $attachment_id : null;
+    }
+
+    /**
+     * Sync filterable attributes from ERP to WooCommerce.
+     *
+     * Processes `filterable_attributes` from the API response. For each attribute:
+     * - Derives slug via wc_sanitize_taxonomy_name($label), truncates to 28 chars if needed
+     * - Reuses existing taxonomy if found in wc_attribute_taxonomies (does NOT modify has_archives)
+     * - Creates new taxonomy with has_archives: true if not found
+     * - Assigns with variation: false, visible: true
+     * - Creates/reuses terms with menu_order based on array position
+     *
+     * Removal logic (Requirements 4.7, 6.7):
+     * - Compares new filterable taxonomies with previously-synced ones (stored in product meta).
+     * - If a filterable attribute was removed from the ERP:
+     *   - If it was filterable-only → remove the attribute entirely from the product.
+     *   - If it was combined (also in attribute_definitions) → revert to variation:true, visible:false, has_archives:false.
+     *
+     * Error handling (Requirements 4.9, 4.10):
+     * - If taxonomy creation fails: log error, skip attribute, continue with remaining.
+     * - If term creation fails: log error, skip term, continue with remaining terms.
+     * - If slug exceeds 28 chars: truncate, log warning with original label and truncated slug.
+     * - If `filterable_attributes` absent from API: treat as empty {}.
+     *
+     * @param \WC_Product $product                    WooCommerce product instance.
+     * @param array|null  $filterable_attributes      Map of code => values from API (null if absent).
+     * @param array       $filterable_attribute_labels Map of code => label from API.
+     * @param array       $existing_attributes        Already-built WC_Product_Attribute objects (from variation sync).
+     * @return array Merged array of WC_Product_Attribute objects.
+     */
+    private function sync_filterable_attributes(
+        \WC_Product $product,
+        ?array $filterable_attributes,
+        array $filterable_attribute_labels,
+        array $existing_attributes = []
+    ): array {
+        // Requirement 4.10: If filterable_attributes absent in API, treat as empty {}.
+        if ( null === $filterable_attributes || ! is_array( $filterable_attributes ) ) {
+            $filterable_attributes = [];
+        }
+
+        // Collect the set of variation taxonomy names from existing_attributes for combined detection.
+        $variation_taxonomies = [];
+        foreach ( $existing_attributes as $attr ) {
+            if ( $attr->get_variation() ) {
+                $variation_taxonomies[] = $attr->get_name();
+            }
+        }
+
+        // Retrieve previously-synced filterable taxonomy names from product meta.
+        $previous_filterable_taxonomies = $this->get_previous_filterable_taxonomies( $product );
+
+        $position = count( $existing_attributes );
+
+        // Track the new set of filterable taxonomy names for this sync cycle.
+        $current_filterable_taxonomies = [];
+
+        foreach ( $filterable_attributes as $code => $values ) {
+            $code = strtolower( trim( (string) $code ) );
+            if ( '' === $code ) {
+                continue;
+            }
+
+            // Resolve label: use provided label or fallback to code.
+            $label = trim( (string) ( $filterable_attribute_labels[ $code ] ?? $code ) );
+            if ( '' === $label ) {
+                $label = $code;
+            }
+
+            // Requirement 4.9: Derive slug and truncate to 28 chars (WooCommerce taxonomy name limit).
+            $slug = wc_sanitize_taxonomy_name( $label );
+            if ( strlen( $slug ) > self::MAX_TAXONOMY_SLUG_LENGTH ) {
+                $original_slug = $slug;
+                $slug = substr( $slug, 0, self::MAX_TAXONOMY_SLUG_LENGTH );
+                $this->log(
+                    'warning',
+                    sprintf(
+                        'Filterable attribute slug truncated: label "%s" produced slug "%s", truncated to "%s" (max %d chars).',
+                        $label,
+                        $original_slug,
+                        $slug,
+                        self::MAX_TAXONOMY_SLUG_LENGTH
+                    )
+                );
+            }
+
+            if ( '' === $slug ) {
+                $this->log( 'error', sprintf( 'Filterable attribute label "%s" produced empty slug, skipping.', $label ) );
+                continue;
+            }
+
+            // Requirement 4.10: If taxonomy creation fails, log error, skip attribute, continue.
+            try {
+                $taxonomy = $this->ensure_filterable_attribute_taxonomy( $slug, $label );
+            } catch ( \Exception $e ) {
+                $this->log(
+                    'error',
+                    sprintf(
+                        'Failed to create/reuse taxonomy for filterable attribute "%s" (slug: "%s"): %s. Skipping attribute.',
+                        $label,
+                        $slug,
+                        $e->getMessage()
+                    )
+                );
+                continue;
+            }
+
+            $current_filterable_taxonomies[] = $taxonomy;
+
+            // Ensure values is an array.
+            if ( ! is_array( $values ) ) {
+                $values = [ (string) $values ];
+            }
+
+            // Create/reuse terms with menu_order based on array position.
+            // Requirement 4.10: If term creation fails, log error, skip term, continue.
+            $term_slugs = [];
+            foreach ( $values as $order => $value ) {
+                $value = trim( (string) $value );
+                if ( '' === $value ) {
+                    continue;
+                }
+                try {
+                    $term_slug = $this->ensure_attribute_term_with_order( $taxonomy, $value, (int) $order );
+                    if ( '' !== $term_slug ) {
+                        $term_slugs[] = $term_slug;
+                    }
+                } catch ( \Exception $e ) {
+                    $this->log(
+                        'error',
+                        sprintf(
+                            'Failed to create term "%s" under taxonomy "%s": %s. Skipping term.',
+                            $value,
+                            $taxonomy,
+                            $e->getMessage()
+                        )
+                    );
+                    continue;
+                }
+            }
+
+            if ( empty( $term_slugs ) ) {
+                continue;
+            }
+
+            $attr_id = (int) wc_attribute_taxonomy_id_by_name( $taxonomy );
+
+            // Check if this taxonomy already exists in existing_attributes (merge case).
+            // Requirement 6.3: When slug matches both attribute_definitions and filterable_attributes,
+            // set variation: true, visible: true, has_archives: true.
+            // Requirement 6.5: If previously variation-only, upgrade visible and has_archives.
+            $merged = false;
+            foreach ( $existing_attributes as &$existing_attr ) {
+                if ( $existing_attr->get_name() === $taxonomy ) {
+                    // Merge: keep variation: true, set visible: true, upgrade has_archives: true.
+                    $existing_options = $existing_attr->get_options();
+                    $merged_options   = array_unique( array_merge( $existing_options, $term_slugs ) );
+                    $existing_attr->set_options( $merged_options );
+                    $existing_attr->set_visible( true );
+                    // Requirement 6.3: Enable has_archives on the taxonomy for layered nav.
+                    $this->enable_has_archives_if_needed( $attr_id );
+                    $merged = true;
+                    break;
+                }
+            }
+            unset( $existing_attr );
+
+            if ( ! $merged ) {
+                $attribute = new \WC_Product_Attribute();
+                $attribute->set_id( $attr_id );
+                $attribute->set_name( $taxonomy );
+                $attribute->set_options( $term_slugs );
+                $attribute->set_position( $position++ );
+                $attribute->set_visible( true );
+                $attribute->set_variation( false );
+
+                $existing_attributes[] = $attribute;
+            }
+        }
+
+        // --- Removal logic (Requirements 4.7, 6.7) ---
+        // Determine which filterable taxonomies were removed since last sync.
+        $removed_taxonomies = array_diff( $previous_filterable_taxonomies, $current_filterable_taxonomies );
+
+        foreach ( $removed_taxonomies as $removed_taxonomy ) {
+            $is_variation = in_array( $removed_taxonomy, $variation_taxonomies, true );
+
+            if ( $is_variation ) {
+                // Combined attribute removed from filterable_attributes but still in attribute_definitions.
+                // Requirement 6.7: Revert to variation:true, visible:false, has_archives:false.
+                foreach ( $existing_attributes as &$existing_attr ) {
+                    if ( $existing_attr->get_name() === $removed_taxonomy ) {
+                        $existing_attr->set_visible( false );
+                        $existing_attr->set_variation( true );
+                        break;
+                    }
+                }
+                unset( $existing_attr );
+
+                // Disable has_archives on the global taxonomy.
+                $this->disable_has_archives( $removed_taxonomy );
+
+                $this->log(
+                    'info',
+                    sprintf(
+                        'Combined attribute "%s" removed from filterable_attributes, reverted to variation-only (visible:false, has_archives:false).',
+                        $removed_taxonomy
+                    )
+                );
+            } else {
+                // Filterable-only attribute removed from ERP.
+                // Requirement 4.7: Remove the attribute entirely from the product.
+                $existing_attributes = array_values(
+                    array_filter(
+                        $existing_attributes,
+                        static function ( $attr ) use ( $removed_taxonomy ) {
+                            return $attr->get_name() !== $removed_taxonomy;
+                        }
+                    )
+                );
+
+                $this->log(
+                    'info',
+                    sprintf(
+                        'Filterable attribute "%s" removed from ERP, removed term association from product.',
+                        $removed_taxonomy
+                    )
+                );
+            }
+        }
+
+        // Store the current filterable taxonomy names for next sync comparison.
+        $this->store_filterable_taxonomies( $product, $current_filterable_taxonomies );
+
+        return $existing_attributes;
+    }
+
+    /**
+     * Get the list of filterable taxonomy names previously synced for this product.
+     *
+     * @param \WC_Product $product WooCommerce product instance.
+     * @return array List of taxonomy names (e.g., ['pa_marca', 'pa_genero']).
+     */
+    private function get_previous_filterable_taxonomies( \WC_Product $product ): array {
+        $product_id = $product->get_id();
+        if ( ! $product_id ) {
+            return [];
+        }
+
+        $stored = get_post_meta( $product_id, '_erp_filterable_taxonomies', true );
+        if ( ! is_array( $stored ) ) {
+            return [];
+        }
+
+        return $stored;
+    }
+
+    /**
+     * Store the current set of filterable taxonomy names on the product for next sync comparison.
+     *
+     * @param \WC_Product $product    WooCommerce product instance.
+     * @param array       $taxonomies List of taxonomy names (e.g., ['pa_marca', 'pa_genero']).
+     */
+    private function store_filterable_taxonomies( \WC_Product $product, array $taxonomies ): void {
+        $product_id = $product->get_id();
+        if ( ! $product_id ) {
+            // Product not yet saved — store via update_meta_data so it persists on next save.
+            $product->update_meta_data( '_erp_filterable_taxonomies', $taxonomies );
+            return;
+        }
+
+        update_post_meta( $product_id, '_erp_filterable_taxonomies', $taxonomies );
+    }
+
+    /**
+     * Disable has_archives (attribute_public = 0) on a global attribute taxonomy.
+     *
+     * Used when a combined attribute is removed from filterable_attributes
+     * but remains in attribute_definitions (Requirement 6.7).
+     *
+     * @param string $taxonomy Full taxonomy name (pa_*).
+     */
+    private function disable_has_archives( string $taxonomy ): void {
+        $attr_id = (int) wc_attribute_taxonomy_id_by_name( $taxonomy );
+        if ( ! $attr_id ) {
+            return;
+        }
+
+        global $wpdb;
+
+        $table   = $wpdb->prefix . 'woocommerce_attribute_taxonomies';
+        $current = $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT attribute_public FROM {$table} WHERE attribute_id = %d",
+                $attr_id
+            )
+        );
+
+        if ( null !== $current && (int) $current === 1 ) {
+            $wpdb->update(
+                $table,
+                [ 'attribute_public' => 0 ],
+                [ 'attribute_id' => $attr_id ],
+                [ '%d' ],
+                [ '%d' ]
+            );
+            delete_transient( 'wc_attribute_taxonomies' );
+        }
+    }
+
+    /**
+     * Ensure a global attribute taxonomy exists for a filterable attribute.
+     *
+     * Key difference from ensure_global_attribute_taxonomy():
+     * - If the taxonomy ALREADY EXISTS in wc_attribute_taxonomies, it is reused
+     *   WITHOUT modifying has_archives or other settings (theme compatibility).
+     * - If the taxonomy does NOT exist, it is created with has_archives: true
+     *   to enable WC_Layered_Nav filtering.
+     *
+     * @param string $slug  Sanitized slug (without pa_ prefix), max 28 chars.
+     * @param string $label Human-readable label.
+     * @return string Full taxonomy name (pa_*).
+     * @throws \RuntimeException On failure to create taxonomy.
+     */
+    private function ensure_filterable_attribute_taxonomy( string $slug, string $label ): string {
+        $taxonomy = 'pa_' . $slug;
+
+        // Check if taxonomy already exists in wc_attribute_taxonomies.
+        $attr_id = $this->resolve_global_attribute_id( $taxonomy, $slug );
+
+        // Handle orphan taxonomy (WP taxonomy exists but no WC row).
+        if ( ! $attr_id && taxonomy_exists( $taxonomy ) ) {
+            $attr_id = $this->repair_orphan_pa_taxonomy_row( $slug, $label );
+        }
+
+        if ( $attr_id ) {
+            // Taxonomy already exists - reuse WITHOUT modifying has_archives (Req 5.1, 5.8).
+            // Only update the label if needed.
+            $this->update_global_attribute_label_if_needed( $attr_id, $label );
+        } else {
+            // Taxonomy does not exist - create with has_archives: true (Req 5.6).
+            $created = wc_create_attribute(
+                [
+                    'name'         => $label,
+                    'slug'         => $slug,
+                    'type'         => 'select',
+                    'order_by'     => 'menu_order',
+                    'has_archives' => true,
+                ]
+            );
+
+            if ( is_wp_error( $created ) ) {
+                $code = $created->get_error_code();
+                if ( 'invalid_product_attribute_slug_already_exists' === $code ) {
+                    $attr_id = $this->repair_orphan_pa_taxonomy_row( $slug, $label );
+                }
+                if ( ! $attr_id ) {
+                    $attr_id = $this->resolve_global_attribute_id( $taxonomy, $slug );
+                }
+                if ( ! $attr_id ) {
+                    throw new \RuntimeException( $created->get_error_message() );
+                }
+            } else {
+                $attr_id = (int) $created;
+            }
+
+            delete_transient( 'wc_attribute_taxonomies' );
+        }
+
+        // Ensure the taxonomy is registered in WordPress for the current request.
+        if ( ! taxonomy_exists( $taxonomy ) ) {
+            register_taxonomy(
+                $taxonomy,
+                apply_filters( 'woocommerce_taxonomy_objects_' . $taxonomy, [ 'product' ] ),
+                apply_filters(
+                    'woocommerce_taxonomy_args_' . $taxonomy,
+                    [
+                        'labels'       => [
+                            'name' => $label,
+                        ],
+                        'hierarchical' => false,
+                        'show_ui'      => false,
+                        'query_var'    => true,
+                        'rewrite'      => false,
+                    ]
+                )
+            );
+        }
+
+        return $taxonomy;
+    }
+
+    /**
+     * Ensure attribute term exists and set its menu_order.
+     *
+     * Creates the term if it doesn't exist, then updates menu_order
+     * so that theme's get_terms() with orderby=menu_order returns
+     * values in the same order as the ERP array.
+     *
+     * @param string $taxonomy   pa_* taxonomy.
+     * @param string $value      Term label/name.
+     * @param int    $menu_order Position in the filterable_attributes array (0-based).
+     * @return string Term slug.
+     * @throws \RuntimeException On failure to create term.
+     */
+    private function ensure_attribute_term_with_order( string $taxonomy, string $value, int $menu_order ): string {
+        $value = trim( $value );
+        if ( '' === $value ) {
+            return '';
+        }
+
+        $term = get_term_by( 'name', $value, $taxonomy );
+        if ( ! $term ) {
+            $term = get_term_by( 'slug', sanitize_title( $value ), $taxonomy );
+        }
+
+        if ( $term && ! is_wp_error( $term ) ) {
+            // Term exists - update menu_order if different.
+            $this->update_term_menu_order( $term->term_id, $menu_order );
+            return $term->slug;
+        }
+
+        // Create the term.
+        $inserted = wp_insert_term( $value, $taxonomy );
+        if ( is_wp_error( $inserted ) ) {
+            if ( 'term_exists' === $inserted->get_error_code() ) {
+                $existing_id = (int) $inserted->get_error_data();
+                $existing    = get_term( $existing_id, $taxonomy );
+                if ( $existing && ! is_wp_error( $existing ) ) {
+                    $this->update_term_menu_order( $existing->term_id, $menu_order );
+                    return $existing->slug;
+                }
+            }
+            throw new \RuntimeException( $inserted->get_error_message() );
+        }
+
+        $term_id = (int) $inserted['term_id'];
+        $this->update_term_menu_order( $term_id, $menu_order );
+
+        $created = get_term( $term_id, $taxonomy );
+        return ( $created && ! is_wp_error( $created ) ) ? $created->slug : sanitize_title( $value );
+    }
+
+    /**
+     * Update the menu_order (term_order) for a WooCommerce attribute term.
+     *
+     * WooCommerce stores term ordering in the termmeta table with key 'order'.
+     * This is used by get_terms() when orderby=menu_order.
+     *
+     * @param int $term_id    Term ID.
+     * @param int $menu_order Desired order position.
+     */
+    private function update_term_menu_order( int $term_id, int $menu_order ): void {
+        update_term_meta( $term_id, 'order', $menu_order );
     }
 
     /**

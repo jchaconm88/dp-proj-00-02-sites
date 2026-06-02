@@ -56,6 +56,7 @@ class WebhookHandler {
         'shipment_updated',
         'price_updated',
         'invoice_generated',
+        'product_changed',
     ];
 
     /**
@@ -103,6 +104,25 @@ class WebhookHandler {
      * @return bool|\WP_Error True if valid, WP_Error if invalid.
      */
     public function validate_signature( \WP_REST_Request $request ) {
+        $encrypted = get_option( 'erp_webhook_secret_encrypted', '' );
+        if ( empty( $encrypted ) ) {
+            $this->log( 'error', 'Webhook rejected: webhook secret not configured.' );
+            return new \WP_Error(
+                'erp_webhook_misconfigured',
+                __( 'Webhook secret not configured.', 'wc-erp-integration' ),
+                [ 'status' => 500 ]
+            );
+        }
+        $webhook_secret = \AgenciaERP\ERPClient::decrypt_credential( $encrypted );
+        if ( empty( $webhook_secret ) ) {
+            $this->log( 'error', 'Webhook rejected: failed to decrypt webhook secret.' );
+            return new \WP_Error(
+                'erp_webhook_misconfigured',
+                __( 'Webhook secret misconfigured.', 'wc-erp-integration' ),
+                [ 'status' => 500 ]
+            );
+        }
+
         $signature = $request->get_header( self::SIGNATURE_HEADER );
         $timestamp = $request->get_header( self::TIMESTAMP_HEADER );
 
@@ -130,32 +150,10 @@ class WebhookHandler {
             }
         }
 
-        // Compute expected signature.
-        // Leer desde opción encriptada (ver AdminSettings: guarda como erp_webhook_secret_encrypted).
-        $encrypted = get_option( 'erp_webhook_secret_encrypted', '' );
-        if ( empty( $encrypted ) ) {
-            $this->log( 'error', 'Webhook rejected: webhook secret not configured.' );
-            return new \WP_Error(
-                'erp_webhook_misconfigured',
-                __( 'Webhook secret not configured.', 'wc-erp-integration' ),
-                [ 'status' => 500 ]
-            );
-        }
-        $webhook_secret = \AgenciaERP\ERPClient::decrypt_credential( $encrypted );
-        if ( empty( $webhook_secret ) ) {
-            $this->log( 'error', 'Webhook rejected: failed to decrypt webhook secret.' );
-            return new \WP_Error(
-                'erp_webhook_misconfigured',
-                __( 'Webhook secret misconfigured.', 'wc-erp-integration' ),
-                [ 'status' => 500 ]
-            );
-        }
-
         $body = $request->get_body();
 
-        // Build the signing payload: timestamp + body (if timestamp provided).
-        $signing_payload = $timestamp ? $timestamp . '.' . $body : $body;
-        $expected_signature = hash_hmac( 'sha256', $signing_payload, $webhook_secret );
+        // The dispatcher signs only the body (not timestamp.body).
+        $expected_signature = hash_hmac( 'sha256', $body, $webhook_secret );
 
         if ( ! hash_equals( $expected_signature, $signature ) ) {
             $this->log( 'warning', 'Webhook rejected: invalid signature.' );
@@ -248,6 +246,10 @@ class WebhookHandler {
 
             case 'invoice_generated':
                 $this->handle_invoice_generated( $event_data );
+                break;
+
+            case 'product_changed':
+                $this->handle_product_changed( $event_data );
                 break;
         }
 
@@ -483,6 +485,52 @@ class WebhookHandler {
             'info',
             sprintf( 'Invoice %s stored for order %d.', $invoice_number, $order->get_id() )
         );
+    }
+
+    /**
+     * Handle product_changed webhook event.
+     *
+     * Triggers a product sync from the ERP for the affected SKU.
+     * Supports actions: created, updated, deleted, unpublished.
+     *
+     * @param array $data Product change data (sku, action, product_id).
+     */
+    private function handle_product_changed( array $data ): void {
+        if ( ! $this->sync_service ) {
+            $this->log( 'error', 'product_changed: sync service not available.' );
+            return;
+        }
+
+        $sku    = trim( (string) ( $data['sku'] ?? '' ) );
+        $action = trim( (string) ( $data['action'] ?? '' ) );
+
+        if ( empty( $sku ) ) {
+            $this->log( 'warning', 'product_changed: missing SKU.' );
+            return;
+        }
+
+        $this->log( 'info', sprintf( 'product_changed: SKU=%s action=%s', $sku, $action ) );
+
+        // Handle delete/unpublish: set product to draft or trash.
+        if ( in_array( $action, [ 'deleted', 'unpublished' ], true ) ) {
+            $product_id = wc_get_product_id_by_sku( $sku );
+            if ( $product_id ) {
+                $product = wc_get_product( $product_id );
+                if ( $product ) {
+                    if ( 'deleted' === $action ) {
+                        $product->set_status( 'trash' );
+                    } else {
+                        $product->set_status( 'draft' );
+                    }
+                    $product->save();
+                    $this->log( 'info', sprintf( 'Product %d (%s) set to %s.', $product_id, $sku, $action ) );
+                }
+            }
+            return;
+        }
+
+        // For created/updated: do a full sync to ensure this product is included.
+        $this->sync_service->syncProducts( true );
     }
 
     /**

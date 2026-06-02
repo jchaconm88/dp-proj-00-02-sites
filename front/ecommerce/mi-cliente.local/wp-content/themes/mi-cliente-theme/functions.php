@@ -878,3 +878,175 @@ require_once get_template_directory() . '/inc/cart-checkout.php';
 
 // Include WhatsApp floating button.
 require_once get_template_directory() . '/inc/whatsapp-button.php';
+
+// Storefront D.Sam (inicio, cabecera, pie, componentes).
+require_once get_template_directory() . '/inc/storefront-icons.php';
+require_once get_template_directory() . '/inc/storefront.php';
+
+/**
+ * Shortcode to render a product attribute filter dropdown.
+ *
+ * Usage: [mi_cliente_filter_attribute taxonomy="pa_marca" label="Marca"]
+ *
+ * Renders a <select> dropdown with terms from the given taxonomy,
+ * using the same filter mechanism as mi_cliente_theme_render_product_filters().
+ *
+ * @since 1.0.0
+ */
+function mi_cliente_theme_filter_attribute_shortcode( $atts ) {
+    if ( ! mi_cliente_theme_is_woocommerce_active() ) {
+        return '';
+    }
+
+    $atts = shortcode_atts( array(
+        'taxonomy' => 'pa_marca',
+        'label'    => 'Marca',
+    ), $atts, 'mi_cliente_filter_attribute' );
+
+    $taxonomy    = sanitize_text_field( $atts['taxonomy'] );
+    $label       = sanitize_text_field( $atts['label'] );
+    $filter_name = 'filter_' . str_replace( 'pa_', '', $taxonomy );
+    // Support array (checkboxes) or string (legacy)
+    $raw_value = isset( $_GET[ $filter_name ] ) ? $_GET[ $filter_name ] : '';
+    if ( is_array( $raw_value ) ) {
+        $active_value = implode( ',', array_map( 'sanitize_text_field', array_map( 'wp_unslash', $raw_value ) ) );
+    } else {
+        $active_value = sanitize_text_field( wp_unslash( $raw_value ) );
+    }
+
+    $terms = get_terms( array(
+        'taxonomy'   => $taxonomy,
+        'hide_empty' => true,
+    ) );
+
+    if ( is_wp_error( $terms ) || empty( $terms ) ) {
+        return '';
+    }
+
+    ob_start();
+    // Use the current page URL as form action to stay on the shop/archive page.
+    $current_url = get_pagenum_link( 1, false );
+    // Strip existing query string — we only want the base path.
+    $action_url = strtok( $current_url, '?' );
+    // Parse active values (comma-separated for multi-select).
+    $active_values = array_filter( array_map( 'trim', explode( ',', $active_value ) ) );
+    ?>
+    <form class="mi-cliente-attribute-filter" method="get" action="<?php echo esc_url( $action_url ); ?>">
+        <div class="mi-cliente-attribute-filter__options" style="display:flex;flex-direction:column;gap:4px;">
+            <?php foreach ( $terms as $term ) :
+                $is_checked = in_array( $term->slug, $active_values, true );
+            ?>
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:14px;">
+                    <input type="checkbox"
+                        name="<?php echo esc_attr( $filter_name ); ?>[]"
+                        value="<?php echo esc_attr( $term->slug ); ?>"
+                        <?php checked( $is_checked ); ?>
+                        onchange="this.form.submit()">
+                    <?php echo esc_html( $term->name ); ?>
+                </label>
+            <?php endforeach; ?>
+        </div>
+    </form>
+    <?php
+    return ob_get_clean();
+}
+add_shortcode( 'mi_cliente_filter_attribute', 'mi_cliente_theme_filter_attribute_shortcode' );
+
+/**
+ * Shortcode to render ALL filterable attribute filters dynamically.
+ *
+ * Usage: [mi_cliente_all_attribute_filters]
+ *
+ * Automatically discovers all product attributes registered in WooCommerce
+ * that have at least one non-empty term assigned to a product, and renders
+ * a checkbox filter group for each one.
+ *
+ * @since 1.0.0
+ */
+function mi_cliente_theme_all_attribute_filters_shortcode( $atts ) {
+    if ( ! mi_cliente_theme_is_woocommerce_active() ) {
+        return '';
+    }
+
+    // Get all WooCommerce attribute taxonomies.
+    $attribute_taxonomies = wc_get_attribute_taxonomies();
+    if ( empty( $attribute_taxonomies ) ) {
+        return '';
+    }
+
+    // Use the current page URL as form action.
+    $current_url = get_pagenum_link( 1, false );
+    $action_url  = strtok( $current_url, '?' );
+
+    ob_start();
+
+    foreach ( $attribute_taxonomies as $attribute ) {
+        $taxonomy    = 'pa_' . $attribute->attribute_name;
+        $label       = $attribute->attribute_label ?: $attribute->attribute_name;
+        $filter_name = 'filter_' . $attribute->attribute_name;
+
+        // Only show attributes that have terms assigned to products (hide_empty).
+        $terms = get_terms( array(
+            'taxonomy'   => $taxonomy,
+            'hide_empty' => true,
+        ) );
+
+        if ( is_wp_error( $terms ) || empty( $terms ) ) {
+            continue;
+        }
+
+        // Get active values from URL.
+        $raw_value = isset( $_GET[ $filter_name ] ) ? $_GET[ $filter_name ] : '';
+        if ( is_array( $raw_value ) ) {
+            $active_values = array_map( 'sanitize_text_field', array_map( 'wp_unslash', $raw_value ) );
+        } else {
+            $active_values = array_filter( array_map( 'trim', explode( ',', sanitize_text_field( wp_unslash( $raw_value ) ) ) ) );
+        }
+        ?>
+        <div class="mi-cliente-filter-group" style="margin-bottom:var(--wp--preset--spacing--30, 1.5rem);">
+            <h3 style="font-size:var(--wp--preset--font-size--large, 1.1rem);margin-bottom:0.5rem;">
+                <?php echo esc_html( $label ); ?>
+            </h3>
+            <form class="mi-cliente-attribute-filter" method="get" action="<?php echo esc_url( $action_url ); ?>">
+                <?php
+                // Preserve other active filters as hidden fields.
+                foreach ( $attribute_taxonomies as $other_attr ) {
+                    $other_name = 'filter_' . $other_attr->attribute_name;
+                    if ( $other_name === $filter_name ) {
+                        continue;
+                    }
+                    if ( ! empty( $_GET[ $other_name ] ) ) {
+                        $other_raw = $_GET[ $other_name ];
+                        $other_vals = is_array( $other_raw )
+                            ? array_map( 'sanitize_text_field', array_map( 'wp_unslash', $other_raw ) )
+                            : array( sanitize_text_field( wp_unslash( $other_raw ) ) );
+                        foreach ( $other_vals as $ov ) {
+                            if ( '' !== $ov ) {
+                                echo '<input type="hidden" name="' . esc_attr( $other_name ) . '[]" value="' . esc_attr( $ov ) . '">';
+                            }
+                        }
+                    }
+                }
+                ?>
+                <div style="display:flex;flex-direction:column;gap:4px;">
+                    <?php foreach ( $terms as $term ) :
+                        $is_checked = in_array( $term->slug, $active_values, true );
+                    ?>
+                        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:14px;">
+                            <input type="checkbox"
+                                name="<?php echo esc_attr( $filter_name ); ?>[]"
+                                value="<?php echo esc_attr( $term->slug ); ?>"
+                                <?php checked( $is_checked ); ?>
+                                onchange="this.form.submit()">
+                            <?php echo esc_html( $term->name ); ?>
+                        </label>
+                    <?php endforeach; ?>
+                </div>
+            </form>
+        </div>
+        <?php
+    }
+
+    return ob_get_clean();
+}
+add_shortcode( 'mi_cliente_all_attribute_filters', 'mi_cliente_theme_all_attribute_filters_shortcode' );

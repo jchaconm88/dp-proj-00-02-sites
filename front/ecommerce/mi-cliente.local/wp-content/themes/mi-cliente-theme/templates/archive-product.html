@@ -1,4 +1,4 @@
-<!-- wp:template-part {"slug":"header","tagName":"header"} /-->
+<!-- wp:template-part {"slug":"chrome","tagName":"div","className":"dsam-chrome-part"} /-->
 
 <!-- wp:group {"tagName":"main","layout":{"type":"constrained"}} -->
 <main class="wp-block-group">
@@ -29,6 +29,10 @@
 			<!-- /wp:heading -->
 
 			<!-- wp:woocommerce/price-filter /-->
+
+			<!-- wp:shortcode -->
+			[mi_cliente_all_attribute_filters]
+			<!-- /wp:shortcode -->
 		</div>
 		<!-- /wp:column -->
 
@@ -70,4 +74,4 @@
 </main>
 <!-- /wp:group -->
 
-<!-- wp:template-part {"slug":"footer","tagName":"footer"} /-->
+<!-- wp:template-part {"slug":"footer","tagName":"div","className":"dsam-footer-part"} /-->

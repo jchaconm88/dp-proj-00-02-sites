@@ -1,0 +1,192 @@
+/**
+ * Entrada Tailwind para mi-cliente-theme (réplica de code.html).
+ *
+ * Preflight global está desactivado (corePlugins.preflight=false) para no
+ * romper WooCommerce ni el editor. En su lugar aplicamos un reset acotado a
+ * los contenedores de la tienda: `.dsam-tw` (header/footer/home/chrome).
+ */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Reset acotado (equivalente al preflight, solo dentro de .dsam-tw)
+   ───────────────────────────────────────────────────────────────────────── */
+@layer base {
+	.dsam-tw,
+	.dsam-tw *,
+	.dsam-tw *::before,
+	.dsam-tw *::after {
+		box-sizing: border-box;
+		border-width: 0;
+		border-style: solid;
+		border-color: currentColor;
+	}
+
+	.dsam-tw {
+		-webkit-text-size-adjust: 100%;
+		-moz-tab-size: 4;
+		tab-size: 4;
+		line-height: 1.5;
+	}
+
+	.dsam-tw h1,
+	.dsam-tw h2,
+	.dsam-tw h3,
+	.dsam-tw h4,
+	.dsam-tw h5,
+	.dsam-tw h6 {
+		font-size: inherit;
+		font-weight: inherit;
+		margin: 0;
+	}
+
+	.dsam-tw p,
+	.dsam-tw figure,
+	.dsam-tw blockquote,
+	.dsam-tw dl,
+	.dsam-tw dd {
+		margin: 0;
+	}
+
+	.dsam-tw ul,
+	.dsam-tw ol {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+	}
+
+	.dsam-tw a {
+		color: inherit;
+		text-decoration: inherit;
+	}
+
+	.dsam-tw img,
+	.dsam-tw svg,
+	.dsam-tw video,
+	.dsam-tw canvas,
+	.dsam-tw picture {
+		display: block;
+		vertical-align: middle;
+	}
+
+	.dsam-tw img,
+	.dsam-tw video {
+		max-width: 100%;
+		height: auto;
+	}
+
+	.dsam-tw button,
+	.dsam-tw input,
+	.dsam-tw select,
+	.dsam-tw textarea {
+		font-family: inherit;
+		font-size: 100%;
+		font-weight: inherit;
+		line-height: inherit;
+		color: inherit;
+		margin: 0;
+		padding: 0;
+	}
+
+	.dsam-tw button,
+	.dsam-tw [type="button"],
+	.dsam-tw [type="submit"] {
+		-webkit-appearance: button;
+		background-color: transparent;
+		background-image: none;
+		cursor: pointer;
+	}
+
+	.dsam-tw :disabled {
+		cursor: default;
+	}
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Estilos del <style> embebido de code.html
+   ───────────────────────────────────────────────────────────────────────── */
+@layer components {
+	.material-symbols-outlined {
+		font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
+		line-height: 1;
+	}
+
+	.product-card:hover .product-action {
+		opacity: 1;
+		transform: translateY(0);
+	}
+
+	.scrolling-banner {
+		white-space: nowrap;
+		overflow: hidden;
+		position: relative;
+	}
+
+	.scrolling-content {
+		display: inline-block;
+		animation: scroll-left 20s linear infinite;
+	}
+
+	@keyframes scroll-left {
+		from {
+			transform: translateX(0);
+		}
+		to {
+			transform: translateX(-50%);
+		}
+	}
+
+	.glass-nav {
+		backdrop-filter: blur(10px);
+		background: rgba(255, 255, 255, 0.9);
+	}
+
+	/* Ocultar scrollbar del nav horizontal (Tailwind no trae scrollbar-hide) */
+	.scrollbar-hide {
+		-ms-overflow-style: none;
+		scrollbar-width: none;
+	}
+
+	.scrollbar-hide::-webkit-scrollbar {
+		display: none;
+	}
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Integración WordPress / FSE: neutralizar wrappers de bloques
+   El render de la tienda emite markup Tailwind puro; los contenedores FSE
+   (main, group, layout) no deben inyectar ancho, margen ni padding.
+   ───────────────────────────────────────────────────────────────────────── */
+.dsam-storefront .wp-site-blocks,
+.dsam-storefront .wp-block-group.dsam-home,
+.dsam-storefront .dsam-chrome-part,
+.dsam-storefront .dsam-footer-part,
+.dsam-storefront .wp-block-template-part {
+	max-width: none !important;
+	margin: 0 !important;
+	padding: 0 !important;
+}
+
+.dsam-storefront main.dsam-home,
+.dsam-storefront .dsam-home > .wp-block-shortcode {
+	max-width: none;
+	margin: 0;
+	padding: 0;
+}
+
+.dsam-storefront .dsam-home > .wp-block-shortcode > * {
+	max-width: 100%;
+}
+
+/* Admin bar: empujar el header fijo hacia abajo */
+body.admin-bar .dsam-tw-header {
+	top: 32px;
+}
+
+@media screen and (max-width: 782px) {
+	body.admin-bar .dsam-tw-header {
+		top: 46px;
+	}
+}

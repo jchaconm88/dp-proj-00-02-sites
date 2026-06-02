@@ -1,0 +1,16 @@
+{
+  "client": "mi-cliente.local",
+  "protocol": "ftp",
+  "host": "ftp.tu-dominio.com",
+  "port": 21,
+  "secure": true,
+  "passive": true,
+  "username": "usuario-deploy",
+  "password": "",
+  "privateKeyPath": "",
+  "remoteThemesPath": "/home/usuario/public_html/wp-content/themes",
+  "remotePluginsPath": "/home/usuario/public_html/wp-content/plugins",
+  "themes": ["mi-cliente-theme"],
+  "plugins": ["woocommerce-erp-integration"],
+  "exclude": ["node_modules", ".git", "tests", "vendor", ".env"]
+}

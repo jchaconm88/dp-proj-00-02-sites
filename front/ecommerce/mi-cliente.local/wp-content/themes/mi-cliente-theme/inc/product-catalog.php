@@ -286,11 +286,21 @@ function mi_cliente_theme_apply_product_filters( $query ) {
 
     foreach ( $filter_map as $param => $taxonomy ) {
         if ( ! empty( $_GET[ $param ] ) ) {
-            $tax_query[] = array(
-                'taxonomy' => $taxonomy,
-                'field'    => 'slug',
-                'terms'    => sanitize_text_field( wp_unslash( $_GET[ $param ] ) ),
-            );
+            $raw = $_GET[ $param ];
+            // Support both array (checkboxes) and comma-separated string (legacy select)
+            if ( is_array( $raw ) ) {
+                $terms_val = array_map( 'sanitize_text_field', array_map( 'wp_unslash', $raw ) );
+            } else {
+                $terms_val = array_filter( array_map( 'trim', explode( ',', sanitize_text_field( wp_unslash( $raw ) ) ) ) );
+            }
+            if ( ! empty( $terms_val ) ) {
+                $tax_query[] = array(
+                    'taxonomy' => $taxonomy,
+                    'field'    => 'slug',
+                    'terms'    => $terms_val,
+                    'operator' => 'IN',
+                );
+            }
         }
     }
 

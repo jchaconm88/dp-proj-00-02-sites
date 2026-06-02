@@ -94,6 +94,44 @@ docker compose restart wordpress
 - **En tu PC `localhost:8080` responde IIS**: no uses 8080 para el backend local si está ocupado; usa el puerto real del backend (p. ej. `3001`).
 - **El plugin da `degraded` con pocos ms**: significa “HTTP ≠ 200”, no latencia alta. Revisa URL base (`.../api/v1`) y el puerto correcto.
 
+## Despliegue local por cliente (SFTP/FTP)
+
+El despliegue es **manual desde tu PC**, un cliente a la vez. Solo sube el **tema** y los **plugins** indicados en la config; no toca la base de datos ni `wp-content/uploads`.
+
+### Requisitos
+
+- Node 18+ y `npm install` en `dp-proj-00-02-sites/`.
+- WordPress ya instalado en el servidor (rutas `remoteThemesPath` / `remotePluginsPath` correctas).
+- Archivo `deploy.config.json` por cliente (en `.gitignore`).
+
+### Configuración
+
+En `front/ecommerce/<hostname>/`:
+
+1. Copiar `deploy.config.example.json` → `deploy.config.json`.
+2. Completar `host`, `username`, rutas remotas y `themes` / `plugins`.
+3. Contraseña: en el JSON, o variable de entorno `DEPLOY_PASSWORD` (recomendado).
+4. SFTP con clave: `privateKeyPath` (ruta absoluta o relativa al repo).
+
+Entornos opcionales: `deploy.staging.json` o `deploy.production.json` en la misma carpeta (se fusionan con el base). Por defecto `--env production`.
+
+### Comandos
+
+Desde `dp-proj-00-02-sites/`:
+
+```bash
+# Simular qué se subiría (sin conectar si falta config válida para dry-run con credenciales)
+npm run deploy -- mi-cliente.local --dry-run
+
+# Desplegar a producción (deploy.config.json o deploy.production.json)
+npm run deploy -- mi-cliente.local
+
+# Staging
+npm run deploy -- mi-cliente.local --env staging
+```
+
+Tras el deploy, en el servidor: activar tema/plugin si es la primera vez, limpiar caché del hosting y revisar la web. La configuración del Personalizador y el catálogo WooCommerce se hace en WP Admin (no viaja en el deploy).
+
 ## Estructura de Carpetas
 
 ```
@@ -106,7 +144,9 @@ dp-proj-00-04/
 │       │   └── screen.png            # Captura de pantalla del diseño
 │       └── components/               # Opcional: plantillas HTML empaquetables
 ├── front/                            # Módulo de temas WordPress
-│   └── [hostname]/                   # Carpeta por cliente (mismo hostname que templates/)
+│   └── ecommerce/[hostname]/         # Carpeta por cliente
+│       ├── deploy.config.example.json
+│       ├── deploy.config.json        # Credenciales (gitignore)
 │       └── wp-content/
 │           └── themes/
 │               └── [theme-name]/     # Tema WordPress FSE
@@ -118,18 +158,15 @@ dp-proj-00-04/
 │                   ├── patterns/
 │                   └── assets/
 ├── scripts/                          # Scripts de automatización
+│   ├── deploy-client.js              # Despliegue local por cliente (SFTP/FTP)
 │   ├── validate-hostname.js          # Validación de formato de hostname
 │   ├── validate-structure.ps1        # Validación de estructura del monorepo
 │   ├── transfer-tokens.js            # Transferencia de tokens diseño → theme.json
 │   ├── compare-screenshots.js        # Comparación visual diseño vs implementación
 │   └── package-template.ps1          # Empaquetado de templates en ZIP
-├── .github/
-│   └── workflows/                    # Pipelines CI/CD
-│       ├── deploy-staging.yml
-│       └── deploy-production.yml
 ├── .editorconfig                     # Reglas de formato compartidas
 ├── .gitignore                        # Exclusiones globales
-├── CLIENTS.md                        # Registro central de clientes
+├── clients.json                      # Registro central de clientes
 ├── WORKFLOW.md                       # Flujo de trabajo documentado
 ├── PLUGINS.md                        # Plugins recomendados por tipo de sitio
 ├── package.json                      # Configuración npm con workspaces
@@ -178,7 +215,7 @@ Diseño → Aprobación → Transferencia de Tokens → Implementación → Vali
 
 5. **Validación de fidelidad**: Se ejecuta el script `compare-screenshots.js` para comparar visualmente la captura del diseño original contra la implementación. Si no coincide dentro del umbral aceptable, se itera sobre la implementación.
 
-6. **Despliegue**: Una vez validado, se hace push a `main` y el pipeline CI/CD (GitHub Actions) despliega automáticamente a staging, y tras aprobación manual, a producción.
+6. **Despliegue**: Desde tu máquina con `npm run deploy -- <hostname>` (ver sección siguiente). Cada cliente tiene su `deploy.config.json` (credenciales fuera de git).
 
 ## Instrucciones para Nuevo Cliente
 
@@ -214,7 +251,17 @@ node scripts/validate-hostname.js [hostname]
 
 ### 4. Registrar el cliente
 
-Agregar la entrada correspondiente en `CLIENTS.md` con los datos del nuevo cliente (nombre, hostname, categoría, estado, rutas, fecha de creación).
+Agregar la entrada correspondiente en `clients.json` con los datos del nuevo cliente (nombre, hostname, categoría, estado, rutas, fecha de creación).
+
+### 6. Configurar despliegue del cliente
+
+Copiar la plantilla y editar credenciales (no commitear):
+
+```bash
+cp front/ecommerce/<hostname>/deploy.config.example.json front/ecommerce/<hostname>/deploy.config.json
+```
+
+Opcional: `deploy.staging.json` / `deploy.production.json` para sobreescribir host o rutas por entorno.
 
 ### 5. Verificar la estructura
 

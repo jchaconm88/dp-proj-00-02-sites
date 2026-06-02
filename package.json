@@ -10,7 +10,8 @@
   "scripts": {
     "validate": "node scripts/validate-structure.js",
     "build": "tsc --project scripts/tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "deploy": "node scripts/deploy-client.js"
   },
   "devDependencies": {
     "@fast-check/vitest": "^0.4.1",
@@ -22,6 +23,8 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
+    "basic-ftp": "^5.0.5",
+    "ssh2-sftp-client": "^12.0.1",
     "yaml": "^2.9.0"
   }
 }

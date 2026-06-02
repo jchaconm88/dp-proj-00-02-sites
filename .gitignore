@@ -7,6 +7,14 @@ vendor/
 .env.*
 !.env.example
 
+# Despliegue local por cliente (credenciales FTP/SFTP)
+deploy.config.json
+deploy.staging.json
+deploy.production.json
+**/deploy.config.json
+**/deploy.staging.json
+**/deploy.production.json
+
 # Build artifacts
 dist/
 build/

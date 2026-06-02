@@ -1,0 +1,96 @@
+/* Repetidor Customizer — secciones de productos (misma estructura que hero) */
+.mi-cliente-home-sections-repeater {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	margin-top: 8px;
+}
+
+.mi-cliente-home-section {
+	border: 1px solid #c3c4c7;
+	border-radius: 4px;
+	background: #fff;
+}
+
+.mi-cliente-home-section__head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 10px 12px;
+	background: #f6f7f7;
+	border-bottom: 1px solid #dcdcde;
+	cursor: pointer;
+}
+
+.mi-cliente-home-section__head strong {
+	font-size: 13px;
+}
+
+.mi-cliente-home-section__head-actions {
+	display: flex;
+	gap: 4px;
+	flex-shrink: 0;
+}
+
+.mi-cliente-home-section__body {
+	padding: 12px;
+	display: none;
+}
+
+.mi-cliente-home-section.is-open .mi-cliente-home-section__body {
+	display: block;
+}
+
+.mi-cliente-home-section__row {
+	margin-bottom: 10px;
+}
+
+.mi-cliente-home-section__row:last-child {
+	margin-bottom: 0;
+}
+
+.mi-cliente-home-section__row label {
+	display: block;
+	font-weight: 600;
+	font-size: 12px;
+	margin-bottom: 4px;
+}
+
+.mi-cliente-home-section__row input[type="text"],
+.mi-cliente-home-section__row input[type="url"],
+.mi-cliente-home-section__row input[type="number"],
+.mi-cliente-home-section__row textarea,
+.mi-cliente-home-section__row select {
+	width: 100%;
+}
+
+.mi-cliente-home-section__row textarea {
+	min-height: 48px;
+	resize: vertical;
+}
+
+.mi-cliente-home-section__hint {
+	font-size: 11px;
+	color: #646970;
+	margin: 4px 0 0;
+}
+
+.mi-cliente-home-section__row--inline {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.mi-cliente-home-section__row--inline label {
+	margin: 0;
+	font-weight: 600;
+}
+
+.mi-cliente-cz-repeater-actions {
+	margin-top: 8px;
+}
+
+.mi-cliente-cz-repeater-actions + .mi-cliente-cz-repeater-actions {
+	margin-top: 0;
+}
