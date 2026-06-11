@@ -206,14 +206,18 @@ class WebhookHandler {
                 [ 'status' => 'processed', 'event' => $event_type ],
                 200
             );
-        } catch ( \Exception $e ) {
+        } catch ( \Throwable $e ) {
             $this->log(
                 'error',
                 sprintf( 'Webhook event %s processing failed: %s', $event_type, $e->getMessage() )
             );
 
             return new \WP_REST_Response(
-                [ 'status' => 'error', 'message' => 'Processing failed.' ],
+                [
+                    'status'  => 'error',
+                    'message' => 'Processing failed.',
+                    'detail'  => $e->getMessage(),
+                ],
                 500
             );
         }
@@ -529,8 +533,16 @@ class WebhookHandler {
             return;
         }
 
-        // For created/updated: do a full sync to ensure this product is included.
-        $this->sync_service->syncProducts( true );
+        // For created/updated: sync only the parent product (by SKU), not the full catalog.
+        try {
+            $this->sync_service->sync_product_by_sku( $sku );
+        } catch ( \Throwable $e ) {
+            $this->log(
+                'error',
+                sprintf( 'product_changed: sync_product_by_sku failed for %s: %s', $sku, $e->getMessage() )
+            );
+            throw $e;
+        }
     }
 
     /**

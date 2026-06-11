@@ -467,10 +467,25 @@ function mi_cliente_theme_performance_cleanup() {
 add_action( 'init', 'mi_cliente_theme_performance_cleanup' );
 
 /**
- * Add defer attribute to non-critical scripts.
+ * Add defer attribute to the theme's own front-end scripts.
  *
- * Applies the `defer` attribute to enqueued scripts that are not critical
- * for initial page rendering. Excludes jQuery and admin bar scripts.
+ * IMPORTANT: This uses an allowlist (only the theme's `mi-cliente-*` bundles)
+ * instead of deferring everything-except-a-blocklist.
+ *
+ * Manually injecting `defer` via `script_loader_tag` bypasses WordPress'
+ * dependency ordering: deferred scripts run after non-deferred ones
+ * regardless of the declared dependency graph. Deferring core/vendor or
+ * WooCommerce assets therefore breaks load order and causes runtime errors
+ * such as:
+ *   - "wp.template is not a function" (wp-util needs underscore at load time),
+ *     which broke the add-to-cart variation form, and
+ *   - "Cannot read properties of undefined (reading 'jsx')" / "R_jsx is not a
+ *     function" on the Cart/Checkout blocks (wc-blocks need react-jsx-runtime
+ *     at load time).
+ *
+ * The theme controls the dependencies of its own bundles, so only those are
+ * safe to defer. Everything else (WordPress core, WooCommerce, blocks,
+ * third-party plugins) is left untouched.
  *
  * @since 1.0.0
  *
@@ -480,31 +495,19 @@ add_action( 'init', 'mi_cliente_theme_performance_cleanup' );
  * @return string Modified script tag with defer attribute.
  */
 function mi_cliente_theme_defer_scripts( $tag, $handle, $src ) {
-    // Never defer admin scripts (Site Editor, block editor, etc. require strict load order).
+    // Never touch admin scripts (Site Editor, block editor, etc.).
     if ( is_admin() ) {
         return $tag;
     }
 
-    // Scripts that should NOT be deferred.
-    $excluded_scripts = array(
-        'jquery-core',
-        'jquery-migrate',
-        'jquery',
-        'admin-bar',
-        'wp-embed',
-    );
-
-    if ( in_array( $handle, $excluded_scripts, true ) ) {
+    // Only defer the theme's own front-end bundles. These are self-contained
+    // (jQuery / WooCommerce deps already load synchronously before them).
+    if ( ! str_starts_with( $handle, 'mi-cliente-' ) ) {
         return $tag;
     }
 
-    // Block editor and WooCommerce scripts must load synchronously on the front end.
-    if ( str_starts_with( $handle, 'wp-' ) || str_starts_with( $handle, 'wc-' ) ) {
-        return $tag;
-    }
-
-    // Skip if already has defer or async.
-    if ( strpos( $tag, 'defer' ) !== false || strpos( $tag, 'async' ) !== false ) {
+    // Skip if already deferred/async.
+    if ( strpos( $tag, ' defer' ) !== false || strpos( $tag, ' async' ) !== false ) {
         return $tag;
     }
 
@@ -562,7 +565,7 @@ add_action( 'wp_enqueue_scripts', 'mi_cliente_theme_enqueue_styles' );
  */
 function mi_cliente_theme_woocommerce_styles() {
     if ( class_exists( 'WooCommerce' ) ) {
-        wp_enqueue_style( 'mi-cliente-woocommerce', get_template_directory_uri() . '/assets/css/woocommerce.css', array(), '1.0.0' );
+        wp_enqueue_style( 'mi-cliente-woocommerce', get_template_directory_uri() . '/assets/css/woocommerce.css', array(), '1.0.4' );
     }
 }
 add_action( 'wp_enqueue_scripts', 'mi_cliente_theme_woocommerce_styles' );
@@ -932,20 +935,7 @@ function mi_cliente_theme_filter_attribute_shortcode( $atts ) {
     $active_values = array_filter( array_map( 'trim', explode( ',', $active_value ) ) );
     ?>
     <form class="mi-cliente-attribute-filter" method="get" action="<?php echo esc_url( $action_url ); ?>">
-        <div class="mi-cliente-attribute-filter__options" style="display:flex;flex-direction:column;gap:4px;">
-            <?php foreach ( $terms as $term ) :
-                $is_checked = in_array( $term->slug, $active_values, true );
-            ?>
-                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:14px;">
-                    <input type="checkbox"
-                        name="<?php echo esc_attr( $filter_name ); ?>[]"
-                        value="<?php echo esc_attr( $term->slug ); ?>"
-                        <?php checked( $is_checked ); ?>
-                        onchange="this.form.submit()">
-                    <?php echo esc_html( $term->name ); ?>
-                </label>
-            <?php endforeach; ?>
-        </div>
+        <?php mi_cliente_theme_render_attribute_filter_options( $filter_name, $taxonomy, $terms, $active_values ); ?>
     </form>
     <?php
     return ob_get_clean();
@@ -978,74 +968,29 @@ function mi_cliente_theme_all_attribute_filters_shortcode( $atts ) {
     $current_url = get_pagenum_link( 1, false );
     $action_url  = strtok( $current_url, '?' );
 
-    ob_start();
+    $ordered            = array();
+    $color_attribute    = null;
 
     foreach ( $attribute_taxonomies as $attribute ) {
-        $taxonomy    = 'pa_' . $attribute->attribute_name;
-        $label       = $attribute->attribute_label ?: $attribute->attribute_name;
-        $filter_name = 'filter_' . $attribute->attribute_name;
-
-        // Only show attributes that have terms assigned to products (hide_empty).
-        $terms = get_terms( array(
-            'taxonomy'   => $taxonomy,
-            'hide_empty' => true,
-        ) );
-
-        if ( is_wp_error( $terms ) || empty( $terms ) ) {
+        if ( 'color' === $attribute->attribute_name ) {
+            $color_attribute = $attribute;
             continue;
         }
-
-        // Get active values from URL.
-        $raw_value = isset( $_GET[ $filter_name ] ) ? $_GET[ $filter_name ] : '';
-        if ( is_array( $raw_value ) ) {
-            $active_values = array_map( 'sanitize_text_field', array_map( 'wp_unslash', $raw_value ) );
-        } else {
-            $active_values = array_filter( array_map( 'trim', explode( ',', sanitize_text_field( wp_unslash( $raw_value ) ) ) ) );
-        }
-        ?>
-        <div class="mi-cliente-filter-group" style="margin-bottom:var(--wp--preset--spacing--30, 1.5rem);">
-            <h3 style="font-size:var(--wp--preset--font-size--large, 1.1rem);margin-bottom:0.5rem;">
-                <?php echo esc_html( $label ); ?>
-            </h3>
-            <form class="mi-cliente-attribute-filter" method="get" action="<?php echo esc_url( $action_url ); ?>">
-                <?php
-                // Preserve other active filters as hidden fields.
-                foreach ( $attribute_taxonomies as $other_attr ) {
-                    $other_name = 'filter_' . $other_attr->attribute_name;
-                    if ( $other_name === $filter_name ) {
-                        continue;
-                    }
-                    if ( ! empty( $_GET[ $other_name ] ) ) {
-                        $other_raw = $_GET[ $other_name ];
-                        $other_vals = is_array( $other_raw )
-                            ? array_map( 'sanitize_text_field', array_map( 'wp_unslash', $other_raw ) )
-                            : array( sanitize_text_field( wp_unslash( $other_raw ) ) );
-                        foreach ( $other_vals as $ov ) {
-                            if ( '' !== $ov ) {
-                                echo '<input type="hidden" name="' . esc_attr( $other_name ) . '[]" value="' . esc_attr( $ov ) . '">';
-                            }
-                        }
-                    }
-                }
-                ?>
-                <div style="display:flex;flex-direction:column;gap:4px;">
-                    <?php foreach ( $terms as $term ) :
-                        $is_checked = in_array( $term->slug, $active_values, true );
-                    ?>
-                        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:14px;">
-                            <input type="checkbox"
-                                name="<?php echo esc_attr( $filter_name ); ?>[]"
-                                value="<?php echo esc_attr( $term->slug ); ?>"
-                                <?php checked( $is_checked ); ?>
-                                onchange="this.form.submit()">
-                            <?php echo esc_html( $term->name ); ?>
-                        </label>
-                    <?php endforeach; ?>
-                </div>
-            </form>
-        </div>
-        <?php
+        $ordered[] = $attribute;
     }
+
+    if ( $color_attribute ) {
+        $ordered[] = $color_attribute;
+    }
+
+    ob_start();
+    echo '<div class="mi-cliente-shop-filters">';
+
+    foreach ( $ordered as $attribute ) {
+        mi_cliente_theme_render_shop_attribute_filter_group( $attribute, $attribute_taxonomies, $action_url );
+    }
+
+    echo '</div>';
 
     return ob_get_clean();
 }

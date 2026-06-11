@@ -251,8 +251,18 @@ class ERPClient implements ERPClientInterface {
      * @return array|null Product data or null.
      */
     public function get_product_by_sku( string $sku ): ?array {
+        $sku = trim( $sku );
+        if ( '' === $sku ) {
+            return null;
+        }
         try {
-            $response = $this->request( 'GET', '/products/sku/' . urlencode( $sku ) );
+            $response = $this->request( 'GET', '/products/' . rawurlencode( $sku ) );
+            if ( ! is_array( $response ) || empty( $response ) ) {
+                return null;
+            }
+            if ( isset( $response['sku'] ) ) {
+                return $response;
+            }
             return $response['data'] ?? null;
         } catch ( \RuntimeException $e ) {
             if ( str_contains( $e->getMessage(), '404' ) ) {

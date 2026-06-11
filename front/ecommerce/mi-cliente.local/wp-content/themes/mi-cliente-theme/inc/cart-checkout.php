@@ -35,19 +35,22 @@ function mi_cliente_theme_validate_add_to_cart( $passed, $product_id, $quantity,
         return $passed;
     }
 
-    // Require color selection.
-    if ( empty( $variations['attribute_pa_color'] ) ) {
-        wc_add_notice(
-            __( 'Por favor selecciona un color antes de agregar al carrito.', 'mi-cliente-theme' ),
-            'error'
-        );
-        return false;
-    }
+    foreach ( $product->get_variation_attributes() as $taxonomy => $options ) {
+        unset( $options );
+        $field = 'attribute_' . sanitize_title( $taxonomy );
+        if ( function_exists( 'wc_variation_attribute_name' ) ) {
+            $field = wc_variation_attribute_name( $taxonomy );
+        }
+        if ( ! empty( $variations[ $field ] ) ) {
+            continue;
+        }
 
-    // Require size selection.
-    if ( empty( $variations['attribute_pa_talla'] ) ) {
         wc_add_notice(
-            __( 'Por favor selecciona una talla antes de agregar al carrito.', 'mi-cliente-theme' ),
+            sprintf(
+                /* translators: %s: attribute label (Color, Talla, etc.) */
+                __( 'Por favor selecciona %s antes de agregar al carrito.', 'mi-cliente-theme' ),
+                wc_attribute_label( $taxonomy, $product )
+            ),
             'error'
         );
         return false;
@@ -645,8 +648,16 @@ add_filter( 'woocommerce_order_again_cart_item_data', 'mi_cliente_theme_preserve
 /**
  * Customize cart item display data.
  *
- * Ensures cart displays: product image, name, size, color, unit price,
- * line subtotal, and quantity controls.
+ * NOTE: Variation attributes (Color, Talla, etc.) are intentionally NOT added
+ * here. WooCommerce already renders them natively in both the classic cart and
+ * the Cart/Checkout blocks (via the Store API `variation` field). A previous
+ * version of this function re-injected them into `woocommerce_get_item_data`,
+ * which produced duplicated lines in the cart ("Color: Verde / Talla: 7.5"
+ * shown twice) because its de-dupe check only compared against other
+ * `item_data` entries, never against the block's native variation output.
+ *
+ * Keep this hook as the place for any *additional* (non-variation) cart line
+ * data the theme may need in the future.
  *
  * @since 1.0.0
  *
@@ -655,34 +666,7 @@ add_filter( 'woocommerce_order_again_cart_item_data', 'mi_cliente_theme_preserve
  * @return array Modified item data.
  */
 function mi_cliente_theme_cart_item_display_data( $item_data, $cart_item ) {
-    if ( ! empty( $cart_item['variation'] ) ) {
-        // Ensure color and size are prominently displayed.
-        foreach ( $cart_item['variation'] as $attr => $value ) {
-            if ( empty( $value ) ) {
-                continue;
-            }
-            $taxonomy = str_replace( 'attribute_', '', $attr );
-            $term = get_term_by( 'slug', $value, $taxonomy );
-            $label = wc_attribute_label( $taxonomy );
-            $display_value = $term ? $term->name : $value;
-
-            // Check if already in item_data to avoid duplicates.
-            $exists = false;
-            foreach ( $item_data as $data ) {
-                if ( $data['key'] === $label ) {
-                    $exists = true;
-                    break;
-                }
-            }
-
-            if ( ! $exists ) {
-                $item_data[] = array(
-                    'key'   => $label,
-                    'value' => $display_value,
-                );
-            }
-        }
-    }
+    unset( $cart_item );
 
     return $item_data;
 }

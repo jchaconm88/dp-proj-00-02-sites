@@ -160,6 +160,22 @@ final class Plugin {
         add_action( 'plugins_loaded', [ $this, 'init' ] );
         add_action( 'admin_menu', [ $this, 'register_admin_menu' ] );
         add_action( 'wp_enqueue_scripts', [ $this, 'enqueue_front_styles' ] );
+        add_filter( 'image_sideload_extensions', [ $this, 'allow_avif_sideload_extensions' ] );
+    }
+
+    /**
+     * Allow AVIF when importing ERP image URLs into the Media Library.
+     *
+     * WordPress core sideload only whitelists jpg/png/gif/webp by default.
+     *
+     * @param string[] $extensions Allowed file extensions.
+     * @return string[]
+     */
+    public function allow_avif_sideload_extensions( array $extensions ): array {
+        if ( ! in_array( 'avif', $extensions, true ) ) {
+            $extensions[] = 'avif';
+        }
+        return $extensions;
     }
 
     /**

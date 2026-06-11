@@ -94,6 +94,93 @@ class SyncService {
      */
     public function init(): void {
         // Sin acciones de cron â€” event-driven.
+        add_filter( 'woocommerce_variation_option_name', [ $this, 'filter_variation_option_name' ], 10, 4 );
+        add_filter( 'woocommerce_available_variation', [ $this, 'normalize_available_variation_attributes' ], 10, 3 );
+        // En ficha de producto incluir variantes agotadas en el JSON para que WC muestre "Sin stock" (no botón gris sin mensaje).
+        add_filter( 'option_woocommerce_hide_out_of_stock_items', [ $this, 'show_out_of_stock_variations_on_product_page' ] );
+    }
+
+    /**
+     * @param mixed $value Option woocommerce_hide_out_of_stock_items ('yes'|'no').
+     * @return mixed
+     */
+    public function show_out_of_stock_variations_on_product_page( $value ) {
+        if ( function_exists( 'is_product' ) && is_product() ) {
+            return 'no';
+        }
+        return $value;
+    }
+
+    /**
+     * Ensure storefront variation JSON always uses canonical term slugs (7.5 → v7pt5).
+     *
+     * @param array                $data      Variation payload for add-to-cart JS.
+     * @param \WC_Product          $product   Parent product.
+     * @param \WC_Product_Variation $variation Variation.
+     */
+    public function normalize_available_variation_attributes( array $data, $product, $variation ): array {
+        unset( $product, $variation );
+        if ( empty( $data['attributes'] ) || ! is_array( $data['attributes'] ) ) {
+            return $data;
+        }
+
+        foreach ( $data['attributes'] as $field => $raw_value ) {
+            $raw_value = (string) $raw_value;
+            if ( '' === $raw_value ) {
+                continue;
+            }
+
+            $taxonomy = str_replace( 'attribute_', '', (string) $field );
+            if ( ! taxonomy_exists( $taxonomy ) ) {
+                continue;
+            }
+
+            $term = get_term_by( 'slug', $raw_value, $taxonomy );
+            if ( ! $term || is_wp_error( $term ) ) {
+                $term = get_term_by( 'name', $raw_value, $taxonomy );
+            }
+            if ( ( ! $term || is_wp_error( $term ) ) && preg_match( '/^\d+\.\d+$/', $raw_value ) ) {
+                $term = $this->find_existing_attribute_term( $taxonomy, $raw_value );
+            }
+
+            if ( $term && ! is_wp_error( $term ) ) {
+                $data['attributes'][ $field ] = $term->slug;
+            }
+        }
+
+        return $data;
+    }
+
+    /**
+     * Show ERP term label in variation dropdowns (name), not internal slug (v7pt5).
+     *
+     * @param string     $option_name Display text.
+     * @param \WP_Term|null $term        Matching term.
+     * @param string     $taxonomy    pa_* taxonomy.
+     * @param \WC_Product $product    Parent product.
+     */
+    public function filter_variation_option_name( $option_name, $term, $taxonomy, $product ): string {
+        unset( $product );
+        $taxonomy = is_string( $taxonomy ) ? $taxonomy : '';
+
+        if ( $term instanceof \WP_Term && '' !== trim( $term->name ) ) {
+            $name = trim( $term->name );
+            if ( ! preg_match( '/^v\d+pt\d+$/', $name ) ) {
+                return $name;
+            }
+        }
+
+        if ( '' !== $taxonomy ) {
+            $resolved = get_term_by( 'slug', (string) $option_name, $taxonomy );
+            if ( $resolved && ! is_wp_error( $resolved ) && '' !== trim( $resolved->name ) ) {
+                $name = trim( $resolved->name );
+                if ( ! preg_match( '/^v\d+pt\d+$/', $name ) ) {
+                    return $name;
+                }
+            }
+        }
+
+        return $this->human_label_from_attribute_slug( (string) $option_name );
     }
 
     /**
@@ -219,6 +306,78 @@ class SyncService {
     }
 
     /**
+     * Sync a single parent product (and its variations) by parent SKU from the ERP API.
+     *
+     * Used by product_changed webhooks instead of a full catalog sync.
+     *
+     * @param string $sku Parent product SKU from ERP.
+     * @return string|null 'created', 'updated', or null if product not found / skipped.
+     * @throws \Exception On sync failure.
+     */
+    public function sync_product_by_sku( string $sku ): ?string {
+        $sku = trim( $sku );
+        if ( '' === $sku ) {
+            return null;
+        }
+
+        $erp_product = $this->erp_client->get_product_by_sku( $sku );
+        if ( empty( $erp_product ) || ! is_array( $erp_product ) ) {
+            $this->log( 'warning', sprintf( 'Product sync by SKU: ERP returned no product for SKU %s.', $sku ) );
+            return null;
+        }
+
+        $erp_product = $this->normalize_erp_api_product( $erp_product );
+        $normalized_sku = trim( (string) ( $erp_product['sku'] ?? '' ) );
+        if ( '' === $normalized_sku ) {
+            $this->log( 'warning', sprintf( 'Product sync by SKU: missing SKU after normalize for %s.', $sku ) );
+            return null;
+        }
+
+        try {
+            $result = $this->sync_single_product( $erp_product );
+            $this->log( 'info', sprintf( 'Product sync by SKU %s: %s.', $normalized_sku, $result ) );
+            return $result;
+        } catch ( \Throwable $e ) {
+            $this->log(
+                'error',
+                sprintf( 'Product sync by SKU %s failed: %s', $normalized_sku, $e->getMessage() )
+            );
+            throw new \RuntimeException(
+                sprintf( 'sync_product_by_sku(%s): %s', $normalized_sku, $e->getMessage() ),
+                0,
+                $e
+            );
+        }
+    }
+
+    /**
+     * Load an existing WC variable product or convert a simple product to variable.
+     *
+     * @param int $product_id Existing WC product ID (0 for new).
+     */
+    private function load_or_create_variable_product( int $product_id ): \WC_Product_Variable {
+        if ( $product_id > 0 ) {
+            $existing = wc_get_product( $product_id );
+            if ( $existing && $existing->is_type( 'variable' ) ) {
+                return $existing;
+            }
+            if ( $existing ) {
+                wp_remove_object_terms( $product_id, 'simple', 'product_type' );
+                wp_set_object_terms( $product_id, 'variable', 'product_type', false );
+                wc_delete_product_transients( $product_id );
+                clean_post_cache( $product_id );
+                $converted = wc_get_product( $product_id );
+                if ( $converted && $converted->is_type( 'variable' ) ) {
+                    return $converted;
+                }
+            }
+            return new \WC_Product_Variable( $product_id );
+        }
+
+        return new \WC_Product_Variable();
+    }
+
+    /**
      * Map ERP API v1 payload (snake_case, variants) to plugin-internal shape.
      *
      * @param array $erp_product Raw product from GET /api/v1/products.
@@ -247,6 +406,20 @@ class SyncService {
             $normalized['variations'] = array_map( [ $this, 'normalize_erp_api_variation' ], $erp_product['variants'] );
         }
 
+        if ( ! empty( $normalized['variations'] ) && is_array( $normalized['variations'] ) ) {
+            $normalized['variations'] = array_values(
+                array_filter(
+                    $normalized['variations'],
+                    static function ( $variation ): bool {
+                        if ( ! is_array( $variation ) ) {
+                            return false;
+                        }
+                        return ! array_key_exists( 'active', $variation ) || false !== $variation['active'];
+                    }
+                )
+            );
+        }
+
         if ( ! empty( $erp_product['attribute_definitions'] ) && empty( $erp_product['attributeDefinitions'] ) ) {
             $normalized['attributeDefinitions'] = $erp_product['attribute_definitions'];
         }
@@ -260,6 +433,9 @@ class SyncService {
         // handles null gracefully per Requirement 4.10.
         if ( ! isset( $normalized['filterable_attribute_labels'] ) ) {
             $normalized['filterable_attribute_labels'] = [];
+        }
+        if ( ! isset( $normalized['filterable_attribute_value_colors'] ) ) {
+            $normalized['filterable_attribute_value_colors'] = [];
         }
 
         return $normalized;
@@ -283,7 +459,11 @@ class SyncService {
         }
 
         if ( ! empty( $variation['attributes'] ) && is_array( $variation['attributes'] ) ) {
-            $normalized['attributes'] = $variation['attributes'];
+            $attrs = [];
+            foreach ( $variation['attributes'] as $code => $raw ) {
+                $attrs[ (string) $code ] = $this->normalize_erp_attribute_value( $raw );
+            }
+            $normalized['attributes'] = $attrs;
         }
 
         return $normalized;
@@ -452,8 +632,10 @@ class SyncService {
         $product->set_short_description( $product_data['short_description'] ?? '' );
         $product->set_regular_price( $product_data['regular_price'] ?? '' );
         $product->set_sale_price( $product_data['sale_price'] ?? '' );
+        $stock_qty = max( 0, (int) ( $product_data['stock_quantity'] ?? 0 ) );
         $product->set_manage_stock( true );
-        $product->set_stock_quantity( $product_data['stock_quantity'] ?? 0 );
+        $product->set_stock_quantity( $stock_qty );
+        $product->set_stock_status( $stock_qty > 0 ? 'instock' : 'outofstock' );
         $product->set_weight( $product_data['weight'] ?? '' );
         $product->set_status( $product_data['status'] ?? 'publish' );
 
@@ -463,13 +645,15 @@ class SyncService {
 
         // Sync filterable attributes for simple products.
         // Requirement 4.10: method handles null/missing filterable_attributes gracefully.
-        $filterable_attributes       = $erp_product['filterable_attributes'] ?? null;
-        $filterable_attribute_labels = $erp_product['filterable_attribute_labels'] ?? [];
+        $filterable_attributes             = $erp_product['filterable_attributes'] ?? null;
+        $filterable_attribute_labels       = $erp_product['filterable_attribute_labels'] ?? [];
+        $filterable_attribute_value_colors = $erp_product['filterable_attribute_value_colors'] ?? [];
         $attributes = $this->sync_filterable_attributes(
             $product,
             $filterable_attributes,
             $filterable_attribute_labels,
-            []
+            [],
+            $filterable_attribute_value_colors
         );
         $product->set_attributes( $attributes );
 
@@ -497,15 +681,7 @@ class SyncService {
     private function sync_variable_product( array $erp_product, int $product_id ): string {
         $product_data = $this->transform_erp_to_wc( $erp_product );
 
-        if ( $product_id ) {
-            $product = wc_get_product( $product_id );
-            if ( ! $product || ! $product->is_type( 'variable' ) ) {
-                // Convert to variable if needed or create new.
-                $product = new \WC_Product_Variable( $product_id );
-            }
-        } else {
-            $product = new \WC_Product_Variable();
-        }
+        $product = $this->load_or_create_variable_product( $product_id );
 
         $product->set_name( $product_data['name'] );
         $product->set_sku( $product_data['sku'] );
@@ -522,20 +698,41 @@ class SyncService {
         $product->update_meta_data( '_erp_last_sync', gmdate( 'c' ) );
 
         $attribute_labels = $this->get_attribute_labels_from_product( $erp_product );
+        $attribute_definitions = $erp_product['attribute_definitions'] ?? $erp_product['attributeDefinitions'] ?? [];
+        if ( ! is_array( $attribute_definitions ) ) {
+            $attribute_definitions = [];
+        }
 
-        // Set up attributes from variations.
-        $attributes = $this->build_attributes_from_variations( $erp_product['variations'], $attribute_labels );
+        // Set up attributes from catalog definitions + variation rows.
+        $attributes = $this->build_attributes_from_variations(
+            $erp_product['variations'],
+            $attribute_labels,
+            $attribute_definitions
+        );
 
         // Sync filterable attributes (after variation attributes, per design).
         // Requirement 4.10: method handles null/missing filterable_attributes gracefully.
-        $filterable_attributes       = $erp_product['filterable_attributes'] ?? null;
-        $filterable_attribute_labels = $erp_product['filterable_attribute_labels'] ?? [];
+        $filterable_attributes             = $erp_product['filterable_attributes'] ?? null;
+        $filterable_attribute_labels       = $erp_product['filterable_attribute_labels'] ?? [];
+        $filterable_attribute_value_colors = $erp_product['filterable_attribute_value_colors'] ?? [];
         $attributes = $this->sync_filterable_attributes(
             $product,
             $filterable_attributes,
             $filterable_attribute_labels,
-            $attributes
+            $attributes,
+            $filterable_attribute_value_colors
         );
+
+        foreach ( $attributes as $index => $attr ) {
+            if ( ! $attr instanceof \WC_Product_Attribute || $attr->get_id() <= 0 ) {
+                continue;
+            }
+            $taxonomy = $attr->get_name();
+            $attr->set_options(
+                $this->normalize_product_attribute_options_to_term_ids( $taxonomy, $attr->get_options() )
+            );
+            $attributes[ $index ] = $attr;
+        }
 
         $product->set_attributes( $attributes );
 
@@ -547,10 +744,46 @@ class SyncService {
         }
 
         // Sync each variation.
-        $parent_sku = trim( (string) ( $erp_product['sku'] ?? '' ) );
+        $parent_sku      = trim( (string) ( $erp_product['sku'] ?? '' ) );
+        $erp_variations  = [];
+        $sync_errors     = 0;
         foreach ( $erp_product['variations'] as $erp_variation ) {
-            $this->sync_variation( $product->get_id(), $erp_variation, $parent_sku, $attribute_labels );
+            if ( ! is_array( $erp_variation ) ) {
+                continue;
+            }
+            $var_sku = trim( (string) ( $erp_variation['sku'] ?? '' ) );
+            if ( '' === $var_sku ) {
+                continue;
+            }
+            $erp_variations[] = $erp_variation;
+            try {
+                $this->sync_variation( $product->get_id(), $erp_variation, $parent_sku, $attribute_labels );
+            } catch ( \Throwable $e ) {
+                $sync_errors++;
+                $this->log(
+                    'error',
+                    sprintf(
+                        'Failed to sync variation SKU %s for parent %s: %s',
+                        $var_sku,
+                        $parent_sku,
+                        $e->getMessage()
+                    )
+                );
+            }
         }
+
+        if ( $sync_errors > 0 && empty( $erp_variations ) ) {
+            throw new \RuntimeException( 'No variations could be synced for this product.' );
+        }
+
+        $this->prune_orphan_variations( $product->get_id(), $erp_variations );
+        $this->dedupe_variations_by_attribute_signature( $product->get_id(), $erp_variations );
+
+        // Refresh lookup table so storefront variation dropdowns see new SKUs.
+        if ( class_exists( '\WC_Product_Variable' ) ) {
+            \WC_Product_Variable::sync( $product->get_id() );
+        }
+        wc_delete_product_transients( $product->get_id() );
 
         return $product_id ? 'updated' : 'created';
     }
@@ -579,63 +812,122 @@ class SyncService {
             );
         }
 
-        $variation_id = wc_get_product_id_by_sku( $variation_sku );
+        $variation_id = $this->find_variation_for_sync( $parent_id, $erp_variation );
 
-        if ( $variation_id ) {
-            $existing = wc_get_product( $variation_id );
-            if ( $existing && ! $existing->is_type( 'variation' ) ) {
-                $variation_id = 0;
-            }
-        }
-
-        if ( $variation_id ) {
+        if ( $variation_id > 0 ) {
             $variation = wc_get_product( $variation_id );
             if ( ! $variation || ! $variation->is_type( 'variation' ) ) {
                 $variation = new \WC_Product_Variation( $variation_id );
+            }
+            if ( (int) $variation->get_parent_id() !== $parent_id ) {
+                $variation->set_parent_id( $parent_id );
             }
         } else {
             $variation = new \WC_Product_Variation();
             $variation->set_parent_id( $parent_id );
         }
 
+        $variation->set_status( 'publish' );
         $variation->set_sku( $variation_sku );
-        $variation->set_regular_price( (string) ( $erp_variation['regular_price'] ?? '' ) );
+
+        $regular_price = (string) ( $erp_variation['regular_price'] ?? '' );
+        if ( '' === $regular_price || ! is_numeric( $regular_price ) ) {
+            $regular_price = (string) ( $erp_variation['sale_price'] ?? '0' );
+        }
+        $variation->set_regular_price( $regular_price );
         $variation->set_sale_price( (string) ( $erp_variation['sale_price'] ?? '' ) );
         $variation->set_weight( (string) ( $erp_variation['weight'] ?? '' ) );
 
-        if ( array_key_exists( 'stock_quantity', $erp_variation ) ) {
+        if ( array_key_exists( 'stock_quantity', $erp_variation ) && ! empty( $erp_variation['manage_stock'] ) ) {
+            $stock_qty = max( 0, (int) $erp_variation['stock_quantity'] );
             $variation->set_manage_stock( true );
-            $stock_qty = (int) $erp_variation['stock_quantity'];
             $variation->set_stock_quantity( $stock_qty );
             $variation->set_stock_status( $stock_qty > 0 ? 'instock' : 'outofstock' );
+        } else {
+            // Sin kardex en ERP: variante publicada pero agotada hasta cargar stock-levels.
+            $variation->set_manage_stock( true );
+            $variation->set_stock_quantity( 0 );
+            $variation->set_stock_status( 'outofstock' );
         }
 
         // Set variation attributes (keys = type code; taxonomy label from denormalized map).
+        $formatted_attributes = [];
         if ( ! empty( $erp_variation['attributes'] ) ) {
-            $formatted_attributes = [];
             foreach ( $erp_variation['attributes'] as $attr_code => $attr_value ) {
-                $attr_code = (string) $attr_code;
-                $label     = $this->resolve_attribute_label( $attr_code, $attribute_labels );
-                $taxonomy  = $this->ensure_global_attribute_taxonomy( $label );
-                $formatted_attributes[ $taxonomy ] = $this->ensure_attribute_term_slug( $taxonomy, (string) $attr_value );
+                $attr_code = strtolower( trim( (string) $attr_code ) );
+                if ( '' === $attr_code ) {
+                    continue;
+                }
+                $value = $this->normalize_erp_attribute_value( $attr_value );
+                if ( '' === $value ) {
+                    continue;
+                }
+                $label    = $this->resolve_attribute_label( $attr_code, $attribute_labels );
+                $taxonomy = $this->ensure_global_attribute_taxonomy( $label, false, $attr_code );
+                $term     = $this->get_attribute_term_for_value( $taxonomy, $value );
+                if ( ! $term ) {
+                    $this->log(
+                        'error',
+                        sprintf(
+                            'Variation SKU %s: could not resolve term "%s" for %s',
+                            $variation_sku,
+                            $value,
+                            $taxonomy
+                        )
+                    );
+                    continue;
+                }
+                $this->ensure_parent_attribute_includes_term( $parent_id, $taxonomy, $term );
+                $formatted_attributes[ $taxonomy ] = $term->slug;
             }
-            $variation->set_attributes( $formatted_attributes );
+            if ( ! empty( $formatted_attributes ) ) {
+                $variation->set_attributes( $formatted_attributes );
+            }
         }
 
         $variation->update_meta_data( '_erp_variation_id', $erp_variation['id'] ?? '' );
         $variation->update_meta_data( '_erp_last_sync', gmdate( 'c' ) );
 
         $variation->save();
+
+        if ( ! empty( $formatted_attributes ) ) {
+            $this->force_variation_attribute_meta( (int) $variation->get_id(), $formatted_attributes );
+        }
+
+        $variation_images = $this->resolve_erp_variation_images( $erp_variation );
+        if ( ! empty( $variation_images ) ) {
+            $this->sync_product_images( (int) $variation->get_id(), $variation_images );
+        }
     }
 
     /**
      * Build WooCommerce product attributes from ERP variations.
      *
-     * @param array $variations ERP variations data.
+     * @param array $variations              ERP variations data.
+     * @param array $attribute_labels        code => label.
+     * @param array $attribute_definitions   code => allowed values from ERP catalog.
      * @return array WC_Product_Attribute objects.
      */
-    private function build_attributes_from_variations( array $variations, array $attribute_labels = [] ): array {
+    private function build_attributes_from_variations(
+        array $variations,
+        array $attribute_labels = [],
+        array $attribute_definitions = []
+    ): array {
         $attribute_values = [];
+
+        foreach ( $attribute_definitions as $code => $values ) {
+            $code = strtolower( trim( (string) $code ) );
+            if ( '' === $code || ! is_array( $values ) ) {
+                continue;
+            }
+            $attribute_values[ $code ] = [];
+            foreach ( $values as $value ) {
+                $value = $this->normalize_erp_attribute_value( $value );
+                if ( '' !== $value ) {
+                    $attribute_values[ $code ][] = $value;
+                }
+            }
+        }
 
         foreach ( $variations as $variation ) {
             $attrs = $variation['attributes'] ?? [];
@@ -647,7 +939,7 @@ class SyncService {
                 if ( ! isset( $attribute_values[ $attr_code ] ) ) {
                     $attribute_values[ $attr_code ] = [];
                 }
-                $attribute_values[ $attr_code ][] = $attr_value;
+                $attribute_values[ $attr_code ][] = $this->normalize_erp_attribute_value( $attr_value );
             }
         }
 
@@ -655,25 +947,39 @@ class SyncService {
         $position   = 0;
 
         foreach ( $attribute_values as $attr_code => $values ) {
-            $label    = $this->resolve_attribute_label( (string) $attr_code, $attribute_labels );
-            $taxonomy = $this->ensure_global_attribute_taxonomy( $label );
-            $term_slugs = [];
-            foreach ( array_unique( $values ) as $value ) {
-                $term_slugs[] = $this->ensure_attribute_term_slug( $taxonomy, (string) $value );
+            $attr_code = strtolower( trim( (string) $attr_code ) );
+            if ( '' === $attr_code ) {
+                continue;
             }
+            try {
+                $label    = $this->resolve_attribute_label( $attr_code, $attribute_labels );
+                $taxonomy = $this->ensure_global_attribute_taxonomy( $label, false, $attr_code );
+                $term_ids = $this->attribute_option_ids_from_values( $taxonomy, array_unique( $values ) );
+                if ( empty( $term_ids ) ) {
+                    continue;
+                }
 
-            $attr_id = (int) wc_attribute_taxonomy_id_by_name( $taxonomy );
+                $attr_id = (int) wc_attribute_taxonomy_id_by_name( $taxonomy );
 
-            $attribute = new \WC_Product_Attribute();
-            $attribute->set_id( $attr_id );
-            $attribute->set_name( $taxonomy );
-            $attribute->set_options( $term_slugs );
-            $attribute->set_position( $position++ );
-            // Visible=true hace que algunos temas muestren "Color: ..." ademÃ¡s del selector de variaciones.
-            $attribute->set_visible( false );
-            $attribute->set_variation( true );
-
-            $attributes[] = $attribute;
+                $attribute = new \WC_Product_Attribute();
+                $attribute->set_id( $attr_id );
+                $attribute->set_name( $taxonomy );
+                $attribute->set_options( $term_ids );
+                $attribute->set_position( $position++ );
+                // Visible=false: el selector de variaciones ya muestra las opciones.
+                $attribute->set_visible( false );
+                $attribute->set_variation( true );
+                $attributes[] = $attribute;
+            } catch ( \Throwable $e ) {
+                $this->log(
+                    'error',
+                    sprintf(
+                        'Skipping variation attribute "%s": %s',
+                        (string) $attr_code,
+                        $e->getMessage()
+                    )
+                );
+            }
         }
 
         return $attributes;
@@ -721,11 +1027,12 @@ class SyncService {
      *
      * @param string $label        Human label (e.g. Talla).
      * @param bool   $has_archives Whether to enable archives (layered nav). Default false.
+     * @param string $code         ERP attribute type code (preferred for pa_* slug).
      * @return string Taxonomy name (pa_*).
      */
-    private function ensure_global_attribute_taxonomy( string $label, bool $has_archives = false ): string {
+    private function ensure_global_attribute_taxonomy( string $label, bool $has_archives = false, string $code = '' ): string {
         $label    = trim( $label );
-        $slug     = wc_sanitize_taxonomy_name( $label );
+        $slug     = $this->taxonomy_slug_for_attribute( $code, $label );
 
         // Truncate slug to 28 characters (WooCommerce taxonomy name limit).
         if ( strlen( $slug ) > 28 ) {
@@ -967,6 +1274,275 @@ class SyncService {
     }
 
     /**
+     * Stable pa_* slug from ERP attribute type code (fallback: label).
+     *
+     * @param string $code  ERP attribute type code (e.g. color, talla-calzado).
+     * @param string $label Human label (e.g. Color).
+     */
+    private function taxonomy_slug_for_attribute( string $code, string $label ): string {
+        $code_slug = wc_sanitize_taxonomy_name( strtolower( trim( $code ) ) );
+        if ( '' !== $code_slug ) {
+            if ( strlen( $code_slug ) > self::MAX_TAXONOMY_SLUG_LENGTH ) {
+                $code_slug = substr( $code_slug, 0, self::MAX_TAXONOMY_SLUG_LENGTH );
+            }
+            return $code_slug;
+        }
+
+        $label_slug = wc_sanitize_taxonomy_name( trim( $label ) );
+        if ( strlen( $label_slug ) > self::MAX_TAXONOMY_SLUG_LENGTH ) {
+            $label_slug = substr( $label_slug, 0, self::MAX_TAXONOMY_SLUG_LENGTH );
+        }
+        return $label_slug;
+    }
+
+    /**
+     * Normalize ERP attribute value for term name/slug (7,5 → 7.5; floats without drift).
+     *
+     * @param mixed $raw Raw value from API.
+     */
+    private function normalize_erp_attribute_value( $raw ): string {
+        if ( is_int( $raw ) ) {
+            return (string) $raw;
+        }
+        if ( is_float( $raw ) ) {
+            $formatted = rtrim( rtrim( sprintf( '%.6F', $raw ), '0' ), '.' );
+            return str_replace( ',', '.', $formatted );
+        }
+
+        $value = trim( str_replace( ',', '.', (string) $raw ) );
+        return $value;
+    }
+
+    /**
+     * Canonical term slug. Decimals use v7pt5 (not 7-5) — WC a veces no valida slugs con guión como talla.
+     *
+     * @param string $value Normalized ERP label (e.g. 7.5).
+     */
+    private function attribute_term_slug( string $value ): string {
+        $value = $this->normalize_erp_attribute_value( $value );
+        if ( '' === $value ) {
+            return '';
+        }
+
+        if ( preg_match( '/^(\d+)\.(\d+)$/', $value, $m ) ) {
+            return 'v' . $m[1] . 'pt' . $m[2];
+        }
+
+        if ( preg_match( '/^\d+$/', $value ) ) {
+            return $value;
+        }
+
+        $slug = sanitize_title( $value );
+        return '' !== $slug ? $slug : 'erp-' . substr( md5( $value ), 0, 12 );
+    }
+
+    /**
+     * Legacy slugs from older plugin versions (7.5 → 7-5).
+     *
+     * @param string $value Normalized display value.
+     * @return string[]
+     */
+    private function legacy_attribute_term_slug_candidates( string $value ): array {
+        $candidates = [ $this->attribute_term_slug( $value ) ];
+        if ( preg_match( '/^\d+\.\d+$/', $value ) ) {
+            $candidates[] = str_replace( '.', '-', $value );
+            $candidates[] = sanitize_title( $value );
+        }
+        return array_values( array_unique( array_filter( $candidates ) ) );
+    }
+
+    /**
+     * @return \WP_Term|null
+     */
+    private function find_existing_attribute_term( string $taxonomy, string $value ) {
+        $value = $this->normalize_erp_attribute_value( $value );
+        if ( '' === $value ) {
+            return null;
+        }
+
+        $term = get_term_by( 'name', $value, $taxonomy );
+        if ( $term && ! is_wp_error( $term ) ) {
+            return $term;
+        }
+
+        foreach ( $this->legacy_attribute_term_slug_candidates( $value ) as $slug ) {
+            $term = get_term_by( 'slug', $slug, $taxonomy );
+            if ( $term && ! is_wp_error( $term ) ) {
+                return $term;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Keep term name as ERP label when slug was sanitized (legacy terms used slug as name).
+     *
+     * @param \WP_Term $term  Existing term.
+     * @param string   $label Human-readable value from ERP.
+     */
+    /**
+     * Human label for internal decimal slugs (v7pt5 → 7.5).
+     */
+    private function human_label_from_attribute_slug( string $slug ): string {
+        if ( preg_match( '/^v(\d+)pt(\d+)$/', $slug, $m ) ) {
+            return $m[1] . '.' . $m[2];
+        }
+        return $slug;
+    }
+
+    /**
+     * Ensure term exists and return WP_Term (name = ERP label, slug canonical).
+     *
+     * @return \WP_Term|null
+     */
+    private function get_attribute_term_for_value( string $taxonomy, string $value ): ?\WP_Term {
+        $value = $this->normalize_erp_attribute_value( $value );
+        if ( '' === $value ) {
+            return null;
+        }
+
+        $slug = $this->ensure_attribute_term( $taxonomy, $value );
+        if ( '' === $slug ) {
+            return null;
+        }
+
+        $term = get_term_by( 'slug', $slug, $taxonomy );
+        if ( $term && ! is_wp_error( $term ) ) {
+            $this->repair_attribute_term_display_name( $term, $value );
+            return $term;
+        }
+
+        return $this->find_existing_attribute_term( $taxonomy, $value );
+    }
+
+    /**
+     * WooCommerce expects term IDs in parent attribute options for global taxonomies.
+     *
+     * @param string $taxonomy pa_*.
+     * @param array  $values   ERP labels.
+     * @return int[]
+     */
+    private function attribute_option_ids_from_values( string $taxonomy, array $values ): array {
+        $ids = [];
+        foreach ( $values as $raw ) {
+            $term = $this->get_attribute_term_for_value( $taxonomy, (string) $raw );
+            if ( $term ) {
+                $ids[ (int) $term->term_id ] = (int) $term->term_id;
+            }
+        }
+        return array_values( $ids );
+    }
+
+    /**
+     * Collapse mixed slug/name/id options to unique term IDs (drops orphan strings).
+     *
+     * @param string $taxonomy pa_*.
+     * @param array  $options  Raw WC attribute options.
+     * @return int[]
+     */
+    private function normalize_product_attribute_options_to_term_ids( string $taxonomy, array $options ): array {
+        $ids = [];
+        foreach ( $options as $opt ) {
+            if ( is_numeric( $opt ) && (int) $opt > 0 ) {
+                $term = get_term( (int) $opt, $taxonomy );
+                if ( $term && ! is_wp_error( $term ) ) {
+                    $ids[ (int) $term->term_id ] = (int) $term->term_id;
+                }
+                continue;
+            }
+
+            $raw = trim( (string) $opt );
+            if ( '' === $raw ) {
+                continue;
+            }
+
+            $term = get_term_by( 'slug', $raw, $taxonomy );
+            if ( ! $term || is_wp_error( $term ) ) {
+                $term = get_term_by( 'name', $raw, $taxonomy );
+            }
+            if ( ( ! $term || is_wp_error( $term ) ) && preg_match( '/^v\d+pt\d+$/', $raw ) ) {
+                $term = $this->find_existing_attribute_term( $taxonomy, $this->human_label_from_attribute_slug( $raw ) );
+            }
+            if ( $term && ! is_wp_error( $term ) ) {
+                $ids[ (int) $term->term_id ] = (int) $term->term_id;
+            }
+        }
+        return array_values( $ids );
+    }
+
+    /**
+     * Parent must list the term ID or WC leaves the variation attribute empty ("Any").
+     */
+    private function ensure_parent_attribute_includes_term( int $parent_id, string $taxonomy, \WP_Term $term ): void {
+        $parent = wc_get_product( $parent_id );
+        if ( ! $parent || ! $parent->is_type( 'variable' ) ) {
+            return;
+        }
+
+        $attributes = $parent->get_attributes();
+        $updated    = false;
+
+        foreach ( $attributes as $key => $attr ) {
+            if ( ! $attr instanceof \WC_Product_Attribute || $attr->get_name() !== $taxonomy ) {
+                continue;
+            }
+
+            $ids = $this->normalize_product_attribute_options_to_term_ids( $taxonomy, $attr->get_options() );
+            if ( ! in_array( (int) $term->term_id, $ids, true ) ) {
+                $ids[] = (int) $term->term_id;
+                $attr->set_options( $ids );
+                $attributes[ $key ] = $attr;
+                $updated              = true;
+            }
+            break;
+        }
+
+        if ( $updated ) {
+            $parent->set_attributes( $attributes );
+            $parent->save();
+        }
+    }
+
+    private function repair_attribute_term_display_name( \WP_Term $term, string $label ): void {
+        $label = trim( $label );
+        $name  = trim( $term->name );
+        if ( $name === $label ) {
+            return;
+        }
+        if ( '' === $label ) {
+            return;
+        }
+        if ( preg_match( '/^v\d+pt\d+$/', $name ) || $name !== $label ) {
+            // Fall through to update.
+        } else {
+            return;
+        }
+
+        $updated = wp_update_term(
+            (int) $term->term_id,
+            $term->taxonomy,
+            array(
+                'name' => $label,
+                'slug' => $term->slug,
+            )
+        );
+
+        if ( is_wp_error( $updated ) ) {
+            $this->log(
+                'warning',
+                sprintf(
+                    'Could not repair attribute term name for "%s" in %s (term %d): %s',
+                    $label,
+                    $term->taxonomy,
+                    (int) $term->term_id,
+                    $updated->get_error_message()
+                )
+            );
+        }
+    }
+
+    /**
      * Ensure attribute term exists; return slug for variation meta.
      *
      * @param string $taxonomy pa_* taxonomy.
@@ -974,33 +1550,455 @@ class SyncService {
      * @return string Term slug.
      */
     private function ensure_attribute_term_slug( string $taxonomy, string $value ): string {
-        $value = trim( $value );
+        return $this->ensure_attribute_term( $taxonomy, $value );
+    }
+
+    /**
+     * Create or resolve an attribute term (display name + URL slug).
+     *
+     * @param string   $taxonomy   pa_* taxonomy.
+     * @param string   $value      Term label from ERP (e.g. "7.5").
+     * @param int|null $menu_order Optional WooCommerce term order.
+     * @return string Term slug.
+     */
+    private function ensure_attribute_term( string $taxonomy, string $value, ?int $menu_order = null ): string {
+        $value = $this->normalize_erp_attribute_value( $value );
         if ( '' === $value ) {
             return '';
         }
 
-        $term = get_term_by( 'name', $value, $taxonomy );
-        if ( ! $term ) {
-            $term = get_term_by( 'slug', sanitize_title( $value ), $taxonomy );
-        }
-        if ( $term && ! is_wp_error( $term ) ) {
-            return $term->slug;
+        $canonical_slug = $this->attribute_term_slug( $value );
+        $term           = $this->find_existing_attribute_term( $taxonomy, $value );
+
+        if ( $term ) {
+            if ( $term->slug !== $canonical_slug ) {
+                $migrated = wp_update_term(
+                    (int) $term->term_id,
+                    $taxonomy,
+                    [
+                        'name' => $value,
+                        'slug' => $canonical_slug,
+                    ]
+                );
+                if ( ! is_wp_error( $migrated ) ) {
+                    $term = get_term( (int) $term->term_id, $taxonomy );
+                }
+            }
+            $this->repair_attribute_term_display_name( $term, $value );
+            if ( null !== $menu_order ) {
+                $this->update_term_menu_order( (int) $term->term_id, $menu_order );
+            }
+            return $term && ! is_wp_error( $term ) ? $term->slug : $canonical_slug;
         }
 
-        $inserted = wp_insert_term( $value, $taxonomy );
+        $inserted = wp_insert_term(
+            $value,
+            $taxonomy,
+            [ 'slug' => $canonical_slug ]
+        );
+
         if ( is_wp_error( $inserted ) ) {
             if ( 'term_exists' === $inserted->get_error_code() ) {
                 $existing_id = (int) $inserted->get_error_data();
                 $existing    = get_term( $existing_id, $taxonomy );
                 if ( $existing && ! is_wp_error( $existing ) ) {
+                    $this->repair_attribute_term_display_name( $existing, $value );
+                    if ( null !== $menu_order ) {
+                        $this->update_term_menu_order( $existing_id, $menu_order );
+                    }
                     return $existing->slug;
                 }
             }
-            return sanitize_title( $value );
+            $this->log(
+                'error',
+                sprintf(
+                    'Could not create attribute term "%s" in %s: %s',
+                    $value,
+                    $taxonomy,
+                    $inserted->get_error_message()
+                )
+            );
+            return '';
         }
 
-        $created = get_term( (int) $inserted['term_id'], $taxonomy );
-        return ( $created && ! is_wp_error( $created ) ) ? $created->slug : sanitize_title( $value );
+        $term_id = (int) $inserted['term_id'];
+        if ( null !== $menu_order ) {
+            $this->update_term_menu_order( $term_id, $menu_order );
+        }
+
+        $created = get_term( $term_id, $taxonomy );
+        if ( $created && ! is_wp_error( $created ) ) {
+            $this->repair_attribute_term_display_name( $created, $value );
+            return $created->slug;
+        }
+
+        return $canonical_slug;
+    }
+
+    /**
+     * Persist variation attribute meta (WC sometimes clears unknown slugs on save).
+     *
+     * @param int   $variation_id Variation post ID.
+     * @param array $attributes   pa_* => term slug.
+     */
+    private function force_variation_attribute_meta( int $variation_id, array $attributes ): void {
+        foreach ( $attributes as $taxonomy => $slug ) {
+            $taxonomy = (string) $taxonomy;
+            $slug     = (string) $slug;
+            if ( '' === $taxonomy || '' === $slug ) {
+                continue;
+            }
+            $meta_key = function_exists( 'wc_variation_attribute_name' )
+                ? wc_variation_attribute_name( $taxonomy )
+                : 'attribute_' . $taxonomy;
+            update_post_meta( $variation_id, $meta_key, $slug );
+        }
+    }
+
+    /**
+     * Resolve existing WC variation under this parent (ERP id meta first, then SKU).
+     */
+    private function find_variation_for_sync( int $parent_id, array $erp_variation ): int {
+        $erp_id = trim( (string) ( $erp_variation['id'] ?? '' ) );
+        if ( '' !== $erp_id ) {
+            $by_id = $this->find_child_variation_by_erp_id( $parent_id, $erp_id );
+            if ( $by_id > 0 ) {
+                return $by_id;
+            }
+        }
+
+        $sku = trim( (string) ( $erp_variation['sku'] ?? '' ) );
+        if ( '' === $sku ) {
+            return 0;
+        }
+
+        $variation_id = (int) wc_get_product_id_by_sku( $sku );
+        if ( $variation_id <= 0 ) {
+            return 0;
+        }
+
+        $existing = wc_get_product( $variation_id );
+        if ( ! $existing || ! $existing->is_type( 'variation' ) ) {
+            return 0;
+        }
+
+        if ( (int) $existing->get_parent_id() !== $parent_id ) {
+            return 0;
+        }
+
+        return $variation_id;
+    }
+
+    /**
+     * @return int Variation post ID or 0.
+     */
+    private function find_child_variation_by_erp_id( int $parent_id, string $erp_id ): int {
+        if ( $parent_id <= 0 || '' === trim( $erp_id ) ) {
+            return 0;
+        }
+
+        $child_ids = get_posts(
+            [
+                'post_parent'    => $parent_id,
+                'post_type'      => 'product_variation',
+                'post_status'    => [ 'publish', 'private', 'draft' ],
+                'numberposts'    => -1,
+                'fields'         => 'ids',
+                'meta_key'       => '_erp_variation_id',
+                'meta_value'     => $erp_id,
+                'suppress_filters' => true,
+            ]
+        );
+
+        if ( empty( $child_ids ) ) {
+            return 0;
+        }
+
+        return (int) $child_ids[0];
+    }
+
+    /**
+     * Stable key for Color+Talla (normalized codes/values).
+     *
+     * @param array $attributes ERP attribute map.
+     */
+    private function variation_attribute_signature( array $attributes ): string {
+        if ( empty( $attributes ) || ! is_array( $attributes ) ) {
+            return '';
+        }
+
+        $pairs = [];
+        foreach ( $attributes as $code => $value ) {
+            $code = strtolower( trim( (string) $code ) );
+            $value = $this->normalize_erp_attribute_value( $value );
+            if ( '' === $code || '' === $value ) {
+                continue;
+            }
+            $pairs[ $code ] = $value;
+        }
+
+        if ( empty( $pairs ) ) {
+            return '';
+        }
+
+        ksort( $pairs );
+        return wp_json_encode( $pairs );
+    }
+
+    /**
+     * @param \WC_Product_Variation $variation WooCommerce variation.
+     */
+    private function wc_variation_attribute_signature( \WC_Product_Variation $variation ): string {
+        $pairs = [];
+        foreach ( $variation->get_attributes() as $taxonomy => $slug ) {
+            $taxonomy = (string) $taxonomy;
+            $slug     = (string) $slug;
+            if ( '' === $taxonomy || '' === $slug ) {
+                continue;
+            }
+            $term = get_term_by( 'slug', $slug, $taxonomy );
+            if ( $term && ! is_wp_error( $term ) ) {
+                $label = trim( $term->name );
+            } else {
+                $label = $this->human_label_from_attribute_slug( $slug );
+            }
+            if ( '' === $label ) {
+                continue;
+            }
+            $code = preg_replace( '/^pa_/', '', $taxonomy );
+            $pairs[ strtolower( (string) $code ) ] = $this->normalize_erp_attribute_value( $label );
+        }
+
+        if ( empty( $pairs ) ) {
+            return '';
+        }
+
+        ksort( $pairs );
+        return wp_json_encode( $pairs );
+    }
+
+    /**
+     * Remove duplicate WC rows for the same attribute combo when ERP has a single variant.
+     *
+     * @param int   $parent_id      Parent product ID.
+     * @param array $erp_variations Variations synced from ERP.
+     */
+    private function dedupe_variations_by_attribute_signature( int $parent_id, array $erp_variations ): void {
+        if ( $parent_id <= 0 || empty( $erp_variations ) ) {
+            return;
+        }
+
+        $erp_by_sig = [];
+        foreach ( $erp_variations as $erp_variation ) {
+            if ( ! is_array( $erp_variation ) ) {
+                continue;
+            }
+            $sig = $this->variation_attribute_signature( $erp_variation['attributes'] ?? [] );
+            if ( '' !== $sig ) {
+                $erp_by_sig[ $sig ] = $erp_variation;
+            }
+        }
+
+        $child_ids = get_posts(
+            [
+                'post_parent' => $parent_id,
+                'post_type'   => 'product_variation',
+                'post_status' => [ 'publish', 'private', 'draft' ],
+                'numberposts' => -1,
+                'fields'      => 'ids',
+            ]
+        );
+
+        $wc_by_sig = [];
+        foreach ( $child_ids as $child_id ) {
+            $child_id = (int) $child_id;
+            $child    = wc_get_product( $child_id );
+            if ( ! $child || ! $child->is_type( 'variation' ) ) {
+                continue;
+            }
+            $sig = $this->wc_variation_attribute_signature( $child );
+            if ( '' === $sig ) {
+                continue;
+            }
+            $wc_by_sig[ $sig ][] = $child_id;
+        }
+
+        foreach ( $wc_by_sig as $sig => $ids ) {
+            if ( count( $ids ) <= 1 || ! isset( $erp_by_sig[ $sig ] ) ) {
+                continue;
+            }
+
+            $keep_id = $this->pick_variation_to_keep( $ids, $erp_by_sig[ $sig ] );
+            foreach ( $ids as $child_id ) {
+                if ( (int) $child_id === (int) $keep_id ) {
+                    continue;
+                }
+                $duplicate = wc_get_product( (int) $child_id );
+                if ( $duplicate ) {
+                    $duplicate->delete( true );
+                    $this->log(
+                        'info',
+                        sprintf(
+                            'Removed duplicate variation %d (same attributes as ERP variant %s).',
+                            (int) $child_id,
+                            (string) ( $erp_by_sig[ $sig ]['id'] ?? $erp_by_sig[ $sig ]['sku'] ?? '' )
+                        )
+                    );
+                }
+            }
+        }
+    }
+
+    /**
+     * @param int[] $variation_ids Candidate WC variation IDs.
+     * @param array $erp_variation Matching ERP row.
+     * @return int Variation ID to keep.
+     */
+    private function pick_variation_to_keep( array $variation_ids, array $erp_variation ): int {
+        $erp_id = trim( (string) ( $erp_variation['id'] ?? '' ) );
+        if ( '' !== $erp_id ) {
+            foreach ( $variation_ids as $variation_id ) {
+                $stored = trim( (string) get_post_meta( (int) $variation_id, '_erp_variation_id', true ) );
+                if ( $stored === $erp_id ) {
+                    return (int) $variation_id;
+                }
+            }
+        }
+
+        $sku = trim( (string) ( $erp_variation['sku'] ?? '' ) );
+        if ( '' !== $sku ) {
+            foreach ( $variation_ids as $variation_id ) {
+                $child = wc_get_product( (int) $variation_id );
+                if ( $child && trim( (string) $child->get_sku() ) === $sku ) {
+                    return (int) $variation_id;
+                }
+            }
+        }
+
+        return (int) min( $variation_ids );
+    }
+
+    /**
+     * Remove WC variations no longer present in ERP (by SKU or ERP id).
+     *
+     * @param int   $parent_id      Parent variable product ID.
+     * @param array $erp_variations Variations synced from ERP.
+     */
+    private function prune_orphan_variations( int $parent_id, array $erp_variations ): void {
+        if ( $parent_id <= 0 ) {
+            return;
+        }
+
+        $allowed_skus = [];
+        $allowed_ids  = [];
+        foreach ( $erp_variations as $erp_variation ) {
+            if ( ! is_array( $erp_variation ) ) {
+                continue;
+            }
+            $sku = trim( (string) ( $erp_variation['sku'] ?? '' ) );
+            if ( '' !== $sku ) {
+                $allowed_skus[ $sku ] = true;
+            }
+            $erp_id = trim( (string) ( $erp_variation['id'] ?? '' ) );
+            if ( '' !== $erp_id ) {
+                $allowed_ids[ $erp_id ] = true;
+            }
+        }
+
+        $child_ids = get_posts(
+            [
+                'post_parent' => $parent_id,
+                'post_type'   => 'product_variation',
+                'post_status' => [ 'publish', 'private', 'draft' ],
+                'numberposts' => -1,
+                'fields'      => 'ids',
+            ]
+        );
+
+        foreach ( $child_ids as $child_id ) {
+            $child_id = (int) $child_id;
+            $child    = wc_get_product( $child_id );
+            if ( ! $child || ! $child->is_type( 'variation' ) ) {
+                continue;
+            }
+
+            $sku     = trim( (string) $child->get_sku() );
+            $erp_id  = trim( (string) $child->get_meta( '_erp_variation_id', true ) );
+            $allowed = ( '' !== $sku && isset( $allowed_skus[ $sku ] ) )
+                || ( '' !== $erp_id && isset( $allowed_ids[ $erp_id ] ) );
+
+            if ( $allowed ) {
+                continue;
+            }
+
+            $child->delete( true );
+            $this->log(
+                'info',
+                sprintf(
+                    'Removed orphan variation %d (SKU %s, ERP id %s).',
+                    $child_id,
+                    $sku ?: '-',
+                    $erp_id ?: '-'
+                )
+            );
+        }
+    }
+
+    /**
+     * Normalize a list of ERP image URLs (non-empty strings only).
+     *
+     * @param mixed $image_urls Raw images array from ERP.
+     * @return array<int, string>
+     */
+    private function normalize_erp_image_urls( $image_urls ): array {
+        if ( ! is_array( $image_urls ) ) {
+            return [];
+        }
+        $out = [];
+        foreach ( $image_urls as $url ) {
+            $url = trim( (string) $url );
+            if ( '' !== $url ) {
+                $out[] = $url;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Resolve catalog images for a product: parent images, or first variation with images.
+     *
+     * @param array $erp_product ERP product payload.
+     * @return array<int, string>
+     */
+    private function resolve_erp_product_images( array $erp_product ): array {
+        $images = $this->normalize_erp_image_urls(
+            $erp_product['images'] ?? $erp_product['image_urls'] ?? []
+        );
+        if ( ! empty( $images ) ) {
+            return $images;
+        }
+        foreach ( $erp_product['variations'] ?? [] as $variation ) {
+            if ( ! is_array( $variation ) ) {
+                continue;
+            }
+            $var_images = $this->resolve_erp_variation_images( $variation );
+            if ( ! empty( $var_images ) ) {
+                return $var_images;
+            }
+        }
+        return [];
+    }
+
+    /**
+     * Resolve images for a single ERP variation.
+     *
+     * @param array $erp_variation ERP variation payload.
+     * @return array<int, string>
+     */
+    private function resolve_erp_variation_images( array $erp_variation ): array {
+        return $this->normalize_erp_image_urls(
+            $erp_variation['images'] ?? $erp_variation['image_urls'] ?? []
+        );
     }
 
     /**
@@ -1023,7 +2021,7 @@ class SyncService {
             'weight'            => (string) ( $erp_product['weight'] ?? $erp_product['weight_kg'] ?? '' ),
             'status'            => $this->map_erp_status( (string) $erp_status ),
             'categories'        => $erp_product['categories'] ?? $erp_product['category_path'] ?? [],
-            'images'            => $erp_product['images'] ?? $erp_product['image_urls'] ?? [],
+            'images'            => $this->resolve_erp_product_images( $erp_product ),
         ];
     }
 
@@ -1045,36 +2043,124 @@ class SyncService {
     }
 
     /**
-     * Resolve category names/slugs to WooCommerce term IDs.
+     * Resolve an ordered ERP category path to WooCommerce term IDs (leaf assigned).
      *
-     * @param array $categories List of category names or slugs.
-     * @return array List of term IDs.
+     * Creates/finds terms as a parent chain so nested categories appear in the store.
+     *
+     * @param array $categories Ordered list of category names (root → leaf).
+     * @return array List of term IDs (leaf only).
      */
     private function resolve_category_ids( array $categories ): array {
-        $term_ids = [];
-
+        $path_names = [];
         foreach ( $categories as $category ) {
-            $cat_name = is_array( $category ) ? ( $category['name'] ?? '' ) : $category;
-            if ( empty( $cat_name ) ) {
-                continue;
+            $name = is_array( $category )
+                ? trim( (string) ( $category['name'] ?? '' ) )
+                : trim( (string) $category );
+            if ( '' !== $name ) {
+                $path_names[] = $name;
             }
+        }
+        if ( empty( $path_names ) ) {
+            return [];
+        }
 
-            $term = get_term_by( 'name', $cat_name, 'product_cat' );
-            if ( ! $term ) {
-                $term = get_term_by( 'slug', sanitize_title( $cat_name ), 'product_cat' );
+        $leaf_id = $this->ensure_product_category_path( $path_names );
+        return $leaf_id ? [ $leaf_id ] : [];
+    }
+
+    /**
+     * Ensure a hierarchical product_cat chain exists and return the leaf term ID.
+     *
+     * @param array<int, string> $path_names Category names from root to leaf.
+     * @return int Leaf term ID or 0.
+     */
+    private function ensure_product_category_path( array $path_names ): int {
+        $parent_id = 0;
+        $term_id   = 0;
+
+        foreach ( $path_names as $name ) {
+            $term_id = $this->ensure_product_category_term( $name, $parent_id );
+            if ( ! $term_id ) {
+                return 0;
             }
-            if ( ! $term ) {
-                // Create the category if it doesn't exist.
-                $result = wp_insert_term( $cat_name, 'product_cat' );
-                if ( ! is_wp_error( $result ) ) {
-                    $term_ids[] = $result['term_id'];
-                }
-            } else {
-                $term_ids[] = $term->term_id;
+            $parent_id = $term_id;
+        }
+
+        return $term_id;
+    }
+
+    /**
+     * Find or create a product_cat term under a specific parent.
+     *
+     * @param string $name      Category display name.
+     * @param int    $parent_id Parent term ID (0 for root).
+     * @return int Term ID or 0 on failure.
+     */
+    private function ensure_product_category_term( string $name, int $parent_id ): int {
+        $existing = get_terms(
+            [
+                'taxonomy'   => 'product_cat',
+                'hide_empty' => false,
+                'name'       => $name,
+                'parent'     => $parent_id,
+                'number'     => 1,
+            ]
+        );
+
+        if ( ! is_wp_error( $existing ) && ! empty( $existing ) ) {
+            return (int) $existing[0]->term_id;
+        }
+
+        $slug = sanitize_title( $name );
+        if ( $parent_id > 0 ) {
+            $parent_term = get_term( $parent_id, 'product_cat' );
+            if ( $parent_term && ! is_wp_error( $parent_term ) && ! empty( $parent_term->slug ) ) {
+                $slug = sanitize_title( $parent_term->slug . '-' . $name );
             }
         }
 
-        return $term_ids;
+        $by_slug = get_terms(
+            [
+                'taxonomy'   => 'product_cat',
+                'hide_empty' => false,
+                'slug'       => $slug,
+                'parent'     => $parent_id,
+                'number'     => 1,
+            ]
+        );
+        if ( ! is_wp_error( $by_slug ) && ! empty( $by_slug ) ) {
+            return (int) $by_slug[0]->term_id;
+        }
+
+        $result = wp_insert_term(
+            $name,
+            'product_cat',
+            [
+                'slug'   => $slug,
+                'parent' => $parent_id,
+            ]
+        );
+
+        if ( is_wp_error( $result ) ) {
+            if ( 'term_exists' === $result->get_error_code() ) {
+                $existing_id = (int) $result->get_error_data();
+                if ( $existing_id > 0 ) {
+                    return $existing_id;
+                }
+            }
+            $this->log(
+                'warning',
+                sprintf(
+                    'Failed to create category "%s" (parent %d): %s',
+                    $name,
+                    $parent_id,
+                    $result->get_error_message()
+                )
+            );
+            return 0;
+        }
+
+        return (int) ( $result['term_id'] ?? 0 );
     }
 
     /**
@@ -1185,15 +2271,8 @@ class SyncService {
                 continue;
             }
 
-            // Download and sideload the image.
-            $attachment_id = media_sideload_image( $url, $product_id, '', 'id' );
-            if ( is_wp_error( $attachment_id ) ) {
-                $this->log( 'warning', sprintf(
-                    'Failed to sideload image for product %d: %s (URL: %s)',
-                    $product_id,
-                    $attachment_id->get_error_message(),
-                    $url
-                ) );
+            $attachment_id = $this->sideload_erp_image_url( $url, $product_id );
+            if ( ! $attachment_id ) {
                 continue;
             }
 
@@ -1219,6 +2298,80 @@ class SyncService {
 
         // Store the synced URLs for change detection on next sync.
         update_post_meta( $product_id, '_erp_synced_image_urls', $image_urls );
+    }
+
+    /**
+     * Download an ERP image URL into the Media Library.
+     *
+     * @param string $url       Public image URL from ERP/Firebase.
+     * @param int    $post_id Parent product or variation post ID.
+     * @return int|null Attachment ID or null on failure.
+     */
+    private function sideload_erp_image_url( string $url, int $post_id ): ?int {
+        $attachment_id = media_sideload_image( $url, $post_id, '', 'id' );
+        if ( ! is_wp_error( $attachment_id ) ) {
+            return (int) $attachment_id;
+        }
+
+        $is_avif = (bool) preg_match( '/\.avif(\?|#|$)/i', $url );
+        if ( ! $is_avif ) {
+            $this->log(
+                'warning',
+                sprintf(
+                    'Failed to sideload image for product %d: %s (URL: %s)',
+                    $post_id,
+                    $attachment_id->get_error_message(),
+                    $url
+                )
+            );
+            return null;
+        }
+
+        require_once ABSPATH . 'wp-admin/includes/media.php';
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+        require_once ABSPATH . 'wp-admin/includes/image.php';
+
+        $tmp = download_url( $url );
+        if ( is_wp_error( $tmp ) ) {
+            $this->log(
+                'warning',
+                sprintf(
+                    'Failed to download AVIF for product %d: %s (URL: %s)',
+                    $post_id,
+                    $tmp->get_error_message(),
+                    $url
+                )
+            );
+            return null;
+        }
+
+        $path_from_url = (string) wp_parse_url( $url, PHP_URL_PATH );
+        $name          = $path_from_url ? wp_basename( $path_from_url ) : 'image.avif';
+        $file_array    = [
+            'name'     => $name,
+            'tmp_name' => $tmp,
+        ];
+
+        $id = media_handle_sideload( $file_array, $post_id );
+        if ( is_wp_error( $id ) ) {
+            @unlink( $tmp );
+            $hint = wp_image_editor_supports( [ 'mime_type' => 'image/avif' ] )
+                ? ''
+                : ' Server PHP/GD does not process AVIF; re-upload as WebP/JPEG from ERP.';
+            $this->log(
+                'warning',
+                sprintf(
+                    'Failed to import AVIF for product %d: %s (URL: %s).%s',
+                    $post_id,
+                    $id->get_error_message(),
+                    $url,
+                    $hint
+                )
+            );
+            return null;
+        }
+
+        return (int) $id;
     }
 
     /**
@@ -1268,7 +2421,8 @@ class SyncService {
         \WC_Product $product,
         ?array $filterable_attributes,
         array $filterable_attribute_labels,
-        array $existing_attributes = []
+        array $existing_attributes = [],
+        array $filterable_attribute_value_colors = []
     ): array {
         // Requirement 4.10: If filterable_attributes absent in API, treat as empty {}.
         if ( null === $filterable_attributes || ! is_array( $filterable_attributes ) ) {
@@ -1303,22 +2457,8 @@ class SyncService {
                 $label = $code;
             }
 
-            // Requirement 4.9: Derive slug and truncate to 28 chars (WooCommerce taxonomy name limit).
-            $slug = wc_sanitize_taxonomy_name( $label );
-            if ( strlen( $slug ) > self::MAX_TAXONOMY_SLUG_LENGTH ) {
-                $original_slug = $slug;
-                $slug = substr( $slug, 0, self::MAX_TAXONOMY_SLUG_LENGTH );
-                $this->log(
-                    'warning',
-                    sprintf(
-                        'Filterable attribute slug truncated: label "%s" produced slug "%s", truncated to "%s" (max %d chars).',
-                        $label,
-                        $original_slug,
-                        $slug,
-                        self::MAX_TAXONOMY_SLUG_LENGTH
-                    )
-                );
-            }
+            // Same pa_* slug as variation attributes (by ERP type code).
+            $slug = $this->taxonomy_slug_for_attribute( $code, $label );
 
             if ( '' === $slug ) {
                 $this->log( 'error', sprintf( 'Filterable attribute label "%s" produced empty slug, skipping.', $label ) );
@@ -1352,14 +2492,30 @@ class SyncService {
             // Requirement 4.10: If term creation fails, log error, skip term, continue.
             $term_slugs = [];
             foreach ( $values as $order => $value ) {
-                $value = trim( (string) $value );
+                $value = $this->normalize_erp_attribute_value( $value );
                 if ( '' === $value ) {
                     continue;
                 }
                 try {
                     $term_slug = $this->ensure_attribute_term_with_order( $taxonomy, $value, (int) $order );
                     if ( '' !== $term_slug ) {
-                        $term_slugs[] = $term_slug;
+                        $term_obj = get_term_by( 'slug', $term_slug, $taxonomy );
+                        if ( $term_obj && ! is_wp_error( $term_obj ) ) {
+                            $term_slugs[] = (int) $term_obj->term_id;
+                        }
+                        $hex = '';
+                        if (
+                            isset( $filterable_attribute_value_colors[ $code ] )
+                            && is_array( $filterable_attribute_value_colors[ $code ] )
+                        ) {
+                            $hex = (string) ( $filterable_attribute_value_colors[ $code ][ $value ] ?? '' );
+                        }
+                        if ( is_string( $hex ) && '' !== $hex && preg_match( '/^#[0-9A-Fa-f]{6}$/', $hex ) ) {
+                            $term_obj = get_term_by( 'slug', $term_slug, $taxonomy );
+                            if ( $term_obj && ! is_wp_error( $term_obj ) ) {
+                                update_term_meta( (int) $term_obj->term_id, 'mi_cliente_color_hex', strtolower( $hex ) );
+                            }
+                        }
                     }
                 } catch ( \Exception $e ) {
                     $this->log(
@@ -1388,12 +2544,15 @@ class SyncService {
             $merged = false;
             foreach ( $existing_attributes as &$existing_attr ) {
                 if ( $existing_attr->get_name() === $taxonomy ) {
-                    // Merge: keep variation: true, set visible: true, upgrade has_archives: true.
-                    $existing_options = $existing_attr->get_options();
-                    $merged_options   = array_unique( array_merge( $existing_options, $term_slugs ) );
+                    // Merge filterable values into variation attribute; keep visible=false on product page (solo selector).
+                    $merged_options = $this->normalize_product_attribute_options_to_term_ids(
+                        $taxonomy,
+                        array_merge( $existing_attr->get_options(), $term_slugs )
+                    );
                     $existing_attr->set_options( $merged_options );
-                    $existing_attr->set_visible( true );
-                    // Requirement 6.3: Enable has_archives on the taxonomy for layered nav.
+                    $existing_attr->set_visible( false );
+                    $existing_attr->set_variation( true );
+                    // Layered nav / archives for filterable facet.
                     $this->enable_has_archives_if_needed( $attr_id );
                     $merged = true;
                     break;
@@ -1640,41 +2799,19 @@ class SyncService {
      * @throws \RuntimeException On failure to create term.
      */
     private function ensure_attribute_term_with_order( string $taxonomy, string $value, int $menu_order ): string {
-        $value = trim( $value );
+        $value = $this->normalize_erp_attribute_value( $value );
         if ( '' === $value ) {
             return '';
         }
 
-        $term = get_term_by( 'name', $value, $taxonomy );
-        if ( ! $term ) {
-            $term = get_term_by( 'slug', sanitize_title( $value ), $taxonomy );
+        $slug = $this->ensure_attribute_term( $taxonomy, $value, $menu_order );
+        if ( '' === $slug ) {
+            throw new \RuntimeException(
+                sprintf( 'Failed to create attribute term "%s" in %s.', $value, $taxonomy )
+            );
         }
 
-        if ( $term && ! is_wp_error( $term ) ) {
-            // Term exists - update menu_order if different.
-            $this->update_term_menu_order( $term->term_id, $menu_order );
-            return $term->slug;
-        }
-
-        // Create the term.
-        $inserted = wp_insert_term( $value, $taxonomy );
-        if ( is_wp_error( $inserted ) ) {
-            if ( 'term_exists' === $inserted->get_error_code() ) {
-                $existing_id = (int) $inserted->get_error_data();
-                $existing    = get_term( $existing_id, $taxonomy );
-                if ( $existing && ! is_wp_error( $existing ) ) {
-                    $this->update_term_menu_order( $existing->term_id, $menu_order );
-                    return $existing->slug;
-                }
-            }
-            throw new \RuntimeException( $inserted->get_error_message() );
-        }
-
-        $term_id = (int) $inserted['term_id'];
-        $this->update_term_menu_order( $term_id, $menu_order );
-
-        $created = get_term( $term_id, $taxonomy );
-        return ( $created && ! is_wp_error( $created ) ) ? $created->slug : sanitize_title( $value );
+        return $slug;
     }
 
     /**
